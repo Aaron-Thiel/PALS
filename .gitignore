@@ -1,0 +1,9 @@
+.nextflow/
+/databases/
+/del/
+/input/
+/results/
+/work/
+
+*.log*
+*.tmp
