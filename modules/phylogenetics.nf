@@ -10,6 +10,7 @@ include { EXTRACT_CORE_GENES } from './phylogenetics/extract_core_genes.nf'
 include { ALIGN_CORE_GENES } from './phylogenetics/align_core_genes.nf'
 include { CONCATENATE_ALIGNMENT } from './phylogenetics/concatenate_alignment.nf'
 include { IQTREE3 } from './phylogenetics/iqtree3.nf'
+include { TREE_VISUALIZATION } from './phylogenetics/tree_visualization.nf'
 
 workflow PHYLOGENETICS {
     take:
@@ -59,6 +60,12 @@ workflow PHYLOGENETICS {
 
     IQTREE3(tree_input)
 
+    // =========================================================================
+    // Step 5: Generate tree visualizations (PNG, SVG, PDF, HTML)
+    // =========================================================================
+
+    TREE_VISUALIZATION(IQTREE3.out.consensus_tree)
+
     emit:
     // Core gene extraction outputs
     core_genes = EXTRACT_CORE_GENES.out.core_gene_list
@@ -73,4 +80,10 @@ workflow PHYLOGENETICS {
     consensus_tree = IQTREE3.out.consensus_tree
     iqtree_report = IQTREE3.out.iqtree_report
     iqtree_stats = IQTREE3.out.iqtree_stats
+
+    // Tree visualization outputs
+    tree_png = TREE_VISUALIZATION.out.png
+    tree_svg = TREE_VISUALIZATION.out.svg
+    tree_pdf = TREE_VISUALIZATION.out.pdf
+    taxonomy_map = TREE_VISUALIZATION.out.taxonomy_map
 }

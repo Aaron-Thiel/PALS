@@ -16,7 +16,7 @@ process SPADES {
     output:
     tuple val(sample_id), path("contigs.fasta"), emit: contigs
     tuple val(sample_id), path("assembly_graph.fastg"), emit: graph
-    tuple val(sample_id), path("contigs.paths"), emit: paths
+    tuple val(sample_id), path("contigs.paths"), emit: paths, optional: true
     tuple val(sample_id), path("spades.log"), emit: log
     
     script:

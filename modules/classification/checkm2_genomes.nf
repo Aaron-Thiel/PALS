@@ -1,8 +1,13 @@
 /*
  * CHECKM2_GENUS - Quality assessment for genomes missing NCBI quality data
- * 
+ *
  * Only runs CheckM2 on genomes with quality_source="pending"
  * If all genomes have quality data, completes quickly
+ *
+ * INTERMEDIATE CACHING: Results are written to a checkpoint file
+ * (checkm2_progress.tsv) in the database directory after each batch.
+ * On timeout/restart, already-assessed genomes are skipped, preserving
+ * progress across multiple runs. Checkpoint is cleaned up on completion.
  */
 
 process CHECKM2_GENUS {
@@ -75,15 +80,39 @@ EOF
     # Step 2: Run CheckM2 on pending genomes
     echo -e "\\n[2/3] Running CheckM2 on \$pending_count genomes..."
 
+    # CHECKPOINT: Load existing progress from previous partial runs
+    PROGRESS_FILE="\$GENUS_DIR/checkm2_progress.tsv"
+    declare -A completed_accessions
+    skipped_from_checkpoint=0
+
+    if [ -f "\$PROGRESS_FILE" ]; then
+        echo "Found checkpoint file - loading previous progress..."
+        while IFS=\$'\\t' read -r name comp cont rest; do
+            # Skip header
+            [[ "\$name" == "Name" ]] && continue
+            # Extract accession (remove .fna suffix if present)
+            acc=\$(echo "\$name" | sed 's/.fna\$//')
+            completed_accessions["\$acc"]=1
+        done < "\$PROGRESS_FILE"
+        echo "  Loaded \${#completed_accessions[@]} previously completed genomes"
+    fi
+
     mkdir -p checkm2_input checkm2_output
 
-    # Copy pending genomes to input directory
+    # Copy pending genomes to input directory (skip already-completed ones)
     while IFS=',' read -r accession species family_col genus_col completeness contamination quality_source assembly_level file_path gff_path rest; do
         # Skip header
         [ "\$accession" = "accession" ] && continue
 
         # Only process pending genomes
         [ "\$quality_source" != "pending" ] && continue
+
+        # CHECKPOINT: Skip if already completed in previous run
+        if [[ -v "completed_accessions[\$accession]" ]]; then
+            echo "  ✓ Skipping \$accession - already in checkpoint"
+            skipped_from_checkpoint=\$((skipped_from_checkpoint + 1))
+            continue
+        fi
 
         # Find the genome file
         fasta=\$(find "\$GENUS_DIR" -name "\${accession}.fna" -type f 2>/dev/null | head -1)
@@ -94,6 +123,10 @@ EOF
             echo "  WARNING: Could not find \$accession.fna in \$GENUS_DIR"
         fi
     done < genome_metadata_merged.csv
+
+    if [ "\$skipped_from_checkpoint" -gt 0 ]; then
+        echo "Skipped \$skipped_from_checkpoint genomes (already in checkpoint)"
+    fi
 
     copied_count=\$(find checkm2_input -name "*.fna" 2>/dev/null | wc -l)
     echo "Copied \$copied_count genomes for analysis"
@@ -138,6 +171,16 @@ EOF
                     --force 2>&1; then
                     checkm2_success=true
                     echo "✓ CheckM2 completed successfully"
+
+                    # CHECKPOINT: Write results to persistent progress file
+                    if [ -f "checkm2_output/quality_report.tsv" ]; then
+                        if [ ! -f "\$PROGRESS_FILE" ]; then
+                            cp checkm2_output/quality_report.tsv "\$PROGRESS_FILE"
+                        else
+                            tail -n +2 checkm2_output/quality_report.tsv >> "\$PROGRESS_FILE"
+                        fi
+                        echo "Checkpoint: Saved results to database"
+                    fi
                 else
                     echo "WARNING: CheckM2 failed with batch size \$batch_size"
                 fi
@@ -167,12 +210,21 @@ EOF
                         --extension .fna \\
                         --database_path \${CHECKM2DB}/uniref100.KO.1.dmnd \\
                         --force 2>&1; then
-                        # Merge results
+                        # Merge results into local output
                         if [ -f "checkm2_batch_output/quality_report.tsv" ]; then
                             if [ ! -f "checkm2_output/quality_report.tsv" ]; then
                                 cp checkm2_batch_output/quality_report.tsv checkm2_output/
                             else
                                 tail -n +2 checkm2_batch_output/quality_report.tsv >> checkm2_output/quality_report.tsv
+                            fi
+
+                            # CHECKPOINT: Also write to persistent progress file in database
+                            if [ ! -f "\$PROGRESS_FILE" ]; then
+                                cp checkm2_batch_output/quality_report.tsv "\$PROGRESS_FILE"
+                                echo "    Checkpoint: Created progress file"
+                            else
+                                tail -n +2 checkm2_batch_output/quality_report.tsv >> "\$PROGRESS_FILE"
+                                echo "    Checkpoint: Appended batch results"
                             fi
                         fi
                         echo "  ✓ Batch \$batch_num completed"
@@ -201,6 +253,13 @@ EOF
     # Step 3: Update metadata with CheckM2 results
     echo -e "\\n[3/3] Updating metadata..."
 
+    # Use checkpoint file as the primary source of results (includes previous + current runs)
+    # Fall back to local output if checkpoint doesn't exist
+    RESULTS_FILE="\$PROGRESS_FILE"
+    if [ ! -f "\$RESULTS_FILE" ]; then
+        RESULTS_FILE="checkm2_output/quality_report.tsv"
+    fi
+
     # Create updated metadata using bash (no Python dependency)
     {
         # Header
@@ -208,10 +267,10 @@ EOF
 
         # Process each line - read all fields including gff_path (10th column)
         tail -n +2 genome_metadata_merged.csv | while IFS=',' read -r accession species family_col genus_col completeness contamination quality_source assembly_level file_path gff_path rest; do
-            if [ "\$quality_source" = "pending" ] && [ "\$checkm2_success" = "true" ]; then
-                # Try to get CheckM2 results
-                if [ -f "checkm2_output/quality_report.tsv" ]; then
-                    checkm2_line=\$(awk -F'\\t' -v acc="\$accession" '\$1 == acc".fna" || \$1 == acc {print; exit}' checkm2_output/quality_report.tsv)
+            if [ "\$quality_source" = "pending" ]; then
+                # Try to get CheckM2 results from checkpoint or local output
+                if [ -f "\$RESULTS_FILE" ]; then
+                    checkm2_line=\$(awk -F'\\t' -v acc="\$accession" '\$1 == acc".fna" || \$1 == acc {print; exit}' "\$RESULTS_FILE")
                     if [ -n "\$checkm2_line" ]; then
                         new_completeness=\$(echo "\$checkm2_line" | cut -f2)
                         new_contamination=\$(echo "\$checkm2_line" | cut -f3)
@@ -254,11 +313,23 @@ EOF
     # Cleanup
     rm -rf checkm2_input
 
+    # Clean up checkpoint file only if all pending genomes have been processed
+    # (no remaining pending means the checkpoint served its purpose)
+    if [ "\$final_pending" -eq 0 ] && [ -f "\$PROGRESS_FILE" ]; then
+        rm -f "\$PROGRESS_FILE"
+        echo "Checkpoint file cleaned up (all genomes processed)"
+    elif [ -f "\$PROGRESS_FILE" ]; then
+        echo "Checkpoint file retained at \$PROGRESS_FILE (\$final_pending genomes still pending)"
+    fi
+
     echo -e "\\n════════════════════════════════════════════════════════════════"
     echo "COMPLETED: CheckM2 analysis for ${genus}"
     echo "  - NCBI quality: \$final_ncbi"
-    echo "  - CheckM2 analyzed: \$final_checkm2"  
+    echo "  - CheckM2 analyzed: \$final_checkm2"
     echo "  - Still pending: \$final_pending"
+    if [ "\$skipped_from_checkpoint" -gt 0 ]; then
+        echo "  - From checkpoint: \$skipped_from_checkpoint"
+    fi
     echo "════════════════════════════════════════════════════════════════"
     """
 }

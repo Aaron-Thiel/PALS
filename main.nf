@@ -119,6 +119,7 @@ workflow {
     
     // Read samplesheet
     // Expected format: sample_id,read1,read2,reference_dir
+    // Note: reference_dir can be empty when sourmash_classify=true (references downloaded automatically)
     channel
         .fromPath(params.input)
         .splitCsv(header: true)
@@ -126,12 +127,21 @@ workflow {
             def sample_id = row.sample_id
             def read1 = file(row.read1, checkIfExists: true)
             def read2 = file(row.read2, checkIfExists: true)
-            
-            // Only check reference directory if classification is disabled (classification provides references automatically)
-            def reference_dir = params.sourmash_classify ? 
-                file(row.reference_dir) : 
-                file(row.reference_dir, checkIfExists: true)
-            
+
+            // Handle reference directory - can be empty when using sourmash classification
+            def ref_dir_value = row.reference_dir?.trim()
+            def reference_dir
+            if (params.sourmash_classify) {
+                // When classification is enabled, reference_dir is optional (will be auto-downloaded)
+                reference_dir = ref_dir_value ? file(ref_dir_value) : file('NO_REF_DIR')
+            } else {
+                // When classification is disabled, reference_dir is required
+                if (!ref_dir_value) {
+                    error "Sample ${sample_id}: reference_dir is required when sourmash_classify=false"
+                }
+                reference_dir = file(ref_dir_value, checkIfExists: true)
+            }
+
             tuple(sample_id, [read1, read2], reference_dir)
         }
         .set { ch_samples }
@@ -219,11 +229,12 @@ workflow {
         ch_selected_references
             .map { sample_id, selected_csv ->
                 // Read the CSV file to get GFF3 paths
+                // CSV columns: accession,species,ani,af_query,completeness,contamination,quality_score,composite_score,quality_source,selection_reason,ref_file,gff_file
                 def gff_files = []
                 selected_csv.readLines().drop(1).each { line ->  // Skip header
                     def columns = line.split(',')
-                    if (columns.size() >= 11) {  // Ensure we have the gff_file column
-                        def gff_path = columns[10]  // gff_file is column 11 (0-indexed)
+                    if (columns.size() >= 12) {  // Ensure we have the gff_file column
+                        def gff_path = columns[11]  // gff_file is column 12 (0-indexed = 11)
                         if (gff_path && !gff_path.isEmpty()) {
                             def gff_file = file(gff_path)
                             if (gff_file.exists()) {
@@ -329,14 +340,19 @@ workflow {
         
         // Use QC results to select the best scaffold (only if pasa_filter is enabled)
         if (params.pasa_filter) {
+            // Use left outer join to handle cases where only one PASA scaffold exists
+            // remainder: true keeps samples even if they don't have a matching QC result
             ch_pasa_scaffolds
-                .join(ch_qc_standard)
-                .join(ch_qc_sensitive)
+                .join(ch_qc_standard, remainder: true)
+                .join(ch_qc_sensitive, remainder: true)
                 .map { sample_id, std, sens, qc_std, qc_sens ->
-                    tuple(sample_id, std, sens, qc_std, qc_sens)
+                    // Replace null QC results with placeholder empty files
+                    def qc_std_file = qc_std ?: file('NO_QC_FILE')
+                    def qc_sens_file = qc_sens ?: file('NO_QC_FILE')
+                    tuple(sample_id, std, sens, qc_std_file, qc_sens_file)
                 }
                 .set { ch_pasa_filter_input }
-            
+
             PASA_FILTER(ch_pasa_filter_input)
             ch_selected_scaffolds = PASA_FILTER.out.selected_scaffold
         } else {

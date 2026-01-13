@@ -17,7 +17,7 @@ genus_download,1,2,30
 merge_gff_fasta,2,2,30
 checkm2_genomes,2,20,240
 bakta_genus,4,16,240
-skani_build_db,,,
+skani_build_db,4,8,30
 skani_search,2,2,10
 reference_selector,1,1,2
 # FILTERING WORKFLOW
@@ -30,12 +30,12 @@ pasa,1,2,30
 pasa_filter,1,1,2
 # PHYLOGENETICS WORKFLOW
 extract_core_genes,1,1,2
-align_core_genes,,,
-concatenate_alignment,,,
-iqtree3,,,
+align_core_genes,4,8,30
+concatenate_alignment,4,8,30
+iqtree3,4,8,30
 # PANGENOMICS WORKFLOW (cohort-level)
 bakta_pangenomics,4,12,30
 panta_cohort,4,2,4
-eggnog,,,
+eggnog,4,8,30
 antismash,2,8,4
-pangenome_plots,,,
+pangenome_plots,4,8,30

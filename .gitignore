@@ -2,7 +2,8 @@
 /databases/
 /del/
 /input/
-/results/
+/results*/
+/validation*/
 /work/
 
 *.log*
