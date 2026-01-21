@@ -14,8 +14,9 @@ include { TREE_VISUALIZATION } from './phylogenetics/tree_visualization.nf'
 
 workflow PHYLOGENETICS {
     take:
-    panta_channel    // tuple(cohort_id, panta_dir) - from PANGENOMICS workflow
-    sample_count_ch  // tuple(cohort_id, sample_count) - number of samples in pangenome
+    panta_channel       // tuple(cohort_id, panta_dir) - from PANGENOMICS workflow
+    sample_count_ch     // tuple(cohort_id, sample_count) - number of samples in pangenome
+    internal_genus_map  // path to TSV file with internal sample_id -> genus mapping
 
     main:
 
@@ -64,7 +65,12 @@ workflow PHYLOGENETICS {
     // Step 5: Generate tree visualizations (PNG, SVG, PDF, HTML)
     // =========================================================================
 
-    TREE_VISUALIZATION(IQTREE3.out.consensus_tree)
+    // Combine tree with genus map for visualization
+    IQTREE3.out.consensus_tree
+        .combine(internal_genus_map)
+        .set { ch_viz_input }
+
+    TREE_VISUALIZATION(ch_viz_input)
 
     emit:
     // Core gene extraction outputs

@@ -27,8 +27,8 @@ import os
 # Parse QC JSON files to extract BUSCO completeness scores
 def get_busco_score(json_file):
     # Extract BUSCO complete_percent from QC comprehensive summary JSON
-    # Handle placeholder files (NO_QC_FILE) gracefully
-    if not json_file or json_file == 'NO_QC_FILE' or not os.path.exists(json_file):
+    # Handle placeholder files (NO_QC_FILE*) gracefully
+    if not json_file or str(json_file).startswith('NO_QC_FILE') or not os.path.exists(json_file):
         return None
     try:
         if os.path.getsize(json_file) == 0:

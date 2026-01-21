@@ -48,7 +48,6 @@ workflow PANGENOMICS {
         .collect()
         .map { gff_list ->
             def count = gff_list.size()
-            log.info "Collected ${count} genomes for pangenomics analysis"
             tuple("pangenomics_${count}_samples", gff_list, count)
         }
         .set { all_gffs }

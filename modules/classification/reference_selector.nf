@@ -40,8 +40,8 @@ process REFERENCE_SELECTOR {
     MAX_REFS=100
     SCORE_CUTOFF=0.88
 
-    # Create output header
-    echo "accession,species,ani,af_query,completeness,contamination,quality_score,composite_score,quality_source,selection_reason,ref_file,gff_file" > selected_references.csv
+    # Create output header (include sample_id for downstream matching)
+    echo "sample_id,accession,species,ani,af_query,completeness,contamination,quality_score,composite_score,quality_source,selection_reason,ref_file,gff_file" > selected_references.csv
 
     # Check if we have ANI results
     ani_count=\$(tail -n +2 ${ani_results} 2>/dev/null | wc -l || echo 0)
@@ -199,7 +199,7 @@ EOF
             fallback_count=\$((fallback_count + 1))
         fi
 
-        echo "\$accession,\$species,\$ani,\$af_query,\$completeness,\$contamination,\$quality_score,\$composite_score,\$quality_source,\$reason,\$ref_file,\$gff_file" >> selected_references.csv
+        echo "${sample_id},\$accession,\$species,\$ani,\$af_query,\$completeness,\$contamination,\$quality_score,\$composite_score,\$quality_source,\$reason,\$ref_file,\$gff_file" >> selected_references.csv
         selected_count=\$((selected_count + 1))
     done < candidates.tmp
 

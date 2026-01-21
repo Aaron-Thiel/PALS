@@ -45,35 +45,38 @@ def parse_bakta_tsv(tsv_file):
         "tool": "bakta",
         "annotation_stats": {}
     }
-    
+
     if not os.path.exists(tsv_file):
         return data
-    
+
     # Count features by type
+    # Bakta TSV columns: Sequence Id, Type, Start, Stop, Strand, Locus Tag, Gene, Product, DbXrefs
     feature_counts = {}
     total_features = 0
-    
+
     try:
         with open(tsv_file, 'r') as f:
-            lines = f.readlines()
-            
-        # Skip header
-        for line in lines[1:]:
-            if line.strip():
-                fields = line.split('\\t')
-                if len(fields) > 2:
-                    feature_type = fields[2]  # Type column
+            for line in f:
+                # Skip comment and header lines (start with #)
+                if line.startswith('#'):
+                    continue
+                if not line.strip():
+                    continue
+
+                fields = line.strip().split('\\t')
+                if len(fields) > 1:
+                    feature_type = fields[1]  # Type is column index 1
                     feature_counts[feature_type] = feature_counts.get(feature_type, 0) + 1
                     total_features += 1
-    
+
         data["annotation_stats"] = {
             "total_features": total_features,
             "feature_counts": feature_counts
         }
-        
+
     except Exception as e:
         print(f"Error parsing Bakta TSV: {e}")
-    
+
     return data
 
 # Parse the TSV file

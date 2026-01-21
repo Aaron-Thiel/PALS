@@ -19,7 +19,7 @@ process TREE_VISUALIZATION {
     conda 'bioconda::toytree conda-forge::toyplot conda-forge::pandas conda-forge::ghostscript'
 
     input:
-    tuple val(sample_id), path(tree_file)
+    tuple val(sample_id), path(tree_file), path(internal_genus_map)
 
     output:
     tuple val(sample_id), path("${sample_id}_circular.png"), path("${sample_id}_rectangular.png"), emit: png
@@ -39,8 +39,6 @@ import toyplot.svg
 import toyplot.pdf
 import pandas as pd
 import os
-import glob
-from pathlib import Path
 
 print("=" * 50)
 print("Tree Visualization with Genus Coloring")
@@ -70,19 +68,16 @@ if os.path.exists(external_tax_file):
     except Exception as e:
         print(f"  Warning: Could not load taxonomy.csv: {e}")
 
-# Load internal data from genus files (SAMN* samples)
-genus_files = glob.glob('${projectDir}/validation_results/SAMN*/classification/sourmash/genus.txt')
-print(f"  Found {len(genus_files)} internal genus files")
-
-for genus_file in genus_files:
+# Load internal data from internal_genus_map.tsv (parsed from pipeline_summary.tsv)
+internal_genus_file = "${internal_genus_map}"
+if os.path.exists(internal_genus_file):
     try:
-        sample_id_file = Path(genus_file).parent.parent.parent.name
-        with open(genus_file, 'r') as f:
-            genus = f.readline().strip()
-        if genus:
-            taxonomy_data.append(pd.DataFrame([{'tip': sample_id_file, 'genus': genus}]))
+        internal_df = pd.read_csv(internal_genus_file, sep='\\t', header=None, names=['tip', 'genus'])
+        internal_df = internal_df[internal_df['genus'].notna() & (internal_df['genus'] != '') & (internal_df['genus'] != 'NA')]
+        taxonomy_data.append(internal_df)
+        print(f"  Loaded {len(internal_df)} internal samples from internal_genus_map.tsv")
     except Exception as e:
-        pass
+        print(f"  Warning: Could not load internal_genus_map.tsv: {e}")
 
 # Combine taxonomy data
 if taxonomy_data:
