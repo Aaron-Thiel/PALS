@@ -25,6 +25,9 @@ process TREE_VISUALIZATION {
     tuple val(sample_id), path("${sample_id}_circular.png"), path("${sample_id}_rectangular.png"), emit: png
     tuple val(sample_id), path("${sample_id}_circular.svg"), path("${sample_id}_rectangular.svg"), emit: svg
     tuple val(sample_id), path("${sample_id}_circular.pdf"), path("${sample_id}_rectangular.pdf"), emit: pdf
+    tuple val(sample_id), path("${sample_id}_species_circular.png"), path("${sample_id}_species_rectangular.png"), emit: species_png, optional: true
+    tuple val(sample_id), path("${sample_id}_species_circular.svg"), path("${sample_id}_species_rectangular.svg"), emit: species_svg, optional: true
+    tuple val(sample_id), path("${sample_id}_species_circular.pdf"), path("${sample_id}_species_rectangular.pdf"), emit: species_pdf, optional: true
     tuple val(sample_id), path("tree_stats.txt"), emit: stats
     path("taxonomy_mapping.tsv"), emit: taxonomy_map
 
@@ -34,10 +37,13 @@ process TREE_VISUALIZATION {
     """
 #!/usr/bin/env python3
 import toytree
+import toyplot
 import toyplot.png
 import toyplot.svg
 import toyplot.pdf
+import toyplot.locator
 import pandas as pd
+import numpy as np
 import os
 
 print("=" * 50)
@@ -58,10 +64,16 @@ taxonomy_data = []
 
 # Load external data from taxonomy.csv (GCA_* genomes)
 external_tax_file = '/home/azureuser/BGC-link/master_thesis/external_data/taxonomy.csv'
+species_data = []  # For species-level tree
 if os.path.exists(external_tax_file):
     try:
         tax_df = pd.read_csv(external_tax_file)
         tax_df = tax_df[tax_df['genus'].notna() & (tax_df['genus'] != '')]
+        # Keep species column for species-level tree
+        if 'species' in tax_df.columns:
+            species_df = tax_df[['genome_id', 'genus', 'species']].rename(columns={'genome_id': 'tip'})
+            species_df = species_df[species_df['species'].notna() & (species_df['species'] != '')]
+            species_data.append(species_df)
         tax_df = tax_df[['genome_id', 'genus']].rename(columns={'genome_id': 'tip'})
         taxonomy_data.append(tax_df)
         print(f"  Loaded {len(tax_df)} external genomes from taxonomy.csv")
@@ -89,6 +101,29 @@ print(f"Total taxonomy mappings: {len(taxonomy_map)}")
 
 # Save taxonomy mapping
 taxonomy_map.to_csv("taxonomy_mapping.tsv", sep="\\t", index=False)
+
+# ========================================
+# Load genome statistics for bar charts
+# ========================================
+print("\\nLoading genome statistics for bar charts...")
+genome_stats_file = '/BGC-data/A/nextflow/del/coverage/genome_stats_species.tsv'
+genome_stats = {}
+if os.path.exists(genome_stats_file):
+    try:
+        stats_df = pd.read_csv(genome_stats_file, sep='\\t')
+        # Create mapping from species to stats
+        for _, row in stats_df.iterrows():
+            species = row['species']
+            genome_stats[species] = {
+                'gc_mean': row['gc_mean'],
+                'length_mean': row['length_mean'] / 1_000_000,  # Convert to Mb
+                'n_genomes': row['n_genomes']
+            }
+        print(f"  Loaded genome stats for {len(genome_stats)} species")
+    except Exception as e:
+        print(f"  Warning: Could not load genome stats: {e}")
+else:
+    print(f"  Genome stats file not found: {genome_stats_file}")
 
 # ========================================
 # Create color mapping for genera
@@ -302,19 +337,318 @@ def render_tree(layout, filename):
 render_tree("circular", "${sample_id}_circular")
 render_tree("rectangular", "${sample_id}_rectangular")
 
+# ========================================
+# Generate Species-Level Tree (collapsed by species, colored by genus)
+# ========================================
+print("\\n" + "=" * 50)
+print("Generating Species-Level Tree")
+print("=" * 50)
+
+# Build species mapping from collected data
+if species_data:
+    full_species_map = pd.concat(species_data, ignore_index=True)
+    tip_species_map = full_species_map.set_index('tip')['species'].to_dict()
+    tip_species_genus_map = full_species_map.set_index('tip')['genus'].to_dict()
+
+    # Get species for each tip
+    species_per_tip = {}
+    for tip in tip_labels:
+        species = tip_species_map.get(tip, None)
+        if species:
+            species_per_tip[tip] = species
+
+    print(f"Species mapping available for {len(species_per_tip)}/{len(tip_labels)} tips")
+
+    if len(species_per_tip) > 0:
+        # Group tips by species
+        species_to_tips = {}
+        for tip, species in species_per_tip.items():
+            if species not in species_to_tips:
+                species_to_tips[species] = []
+            species_to_tips[species].append(tip)
+
+        print(f"Found {len(species_to_tips)} unique species")
+
+        # For species with multiple genomes, keep one representative
+        # Strategy: keep the tip that's most central in the clade (or just first alphabetically for simplicity)
+        tips_to_keep = []
+        species_labels = {}  # map from kept tip to species name
+
+        for species, tips in species_to_tips.items():
+            # Keep first tip alphabetically as representative
+            rep_tip = sorted(tips)[0]
+            tips_to_keep.append(rep_tip)
+            species_labels[rep_tip] = species
+
+        # Only keep tips with species mapping (omit unknown from species tree)
+        n_unmapped = len(tip_labels) - len(species_per_tip)
+        print(f"Keeping {len(tips_to_keep)} species tips (omitting {n_unmapped} unmapped)")
+
+        if len(tips_to_keep) >= 2:
+            # Create pruned tree with only representative tips
+            try:
+                species_tree = tree.mod.prune(*tips_to_keep)
+                print(f"Created species tree with {species_tree.ntips} tips")
+
+                # Get new tip labels and create display labels (species names)
+                species_tip_labels = species_tree.get_tip_labels()
+                display_labels = []
+                display_colors = []
+                species_genus_counts = {}
+
+                for tip in species_tip_labels:
+                    if tip in species_labels:
+                        # Use species name as display label
+                        species_name = species_labels[tip]
+                        display_labels.append(species_name)
+                        # Get genus for coloring
+                        genus = tip_species_genus_map.get(tip, tip_genus_map.get(tip, "Unknown"))
+                    else:
+                        # Keep original label for unmapped tips
+                        display_labels.append(tip)
+                        genus = tip_genus_map.get(tip, "Unknown")
+
+                    if genus == "Unknown":
+                        display_colors.append("#808080")
+                    else:
+                        display_colors.append(genus_colors.get(genus, "#808080"))
+
+                    # Count species per genus
+                    species_genus_counts[genus] = species_genus_counts.get(genus, 0) + 1
+
+                # Collect stats for species in the tree
+                species_gc_values = []
+                species_length_values = []
+                species_with_stats = []
+
+                for tip, species_name in zip(species_tip_labels, display_labels):
+                    # Try to find stats with different name formats
+                    stats = None
+                    # Try species name with underscore
+                    species_key = species_name.replace(' ', '_')
+                    if species_key in genome_stats:
+                        stats = genome_stats[species_key]
+                    elif species_name in genome_stats:
+                        stats = genome_stats[species_name]
+
+                    if stats:
+                        species_gc_values.append(stats['gc_mean'])
+                        species_length_values.append(stats['length_mean'])
+                        species_with_stats.append(species_name)
+                    else:
+                        species_gc_values.append(None)
+                        species_length_values.append(None)
+
+                has_stats = any(v is not None for v in species_gc_values)
+                if has_stats:
+                    print(f"  Found genome stats for {len(species_with_stats)}/{len(display_labels)} species")
+                else:
+                    print("  No genome stats available for bar charts")
+
+                # Render species tree
+                def render_species_tree(layout, filename):
+                    print(f"  Generating {layout} species tree...")
+
+                    w = ${width}
+                    h = ${height}
+
+                    if layout == "rectangular":
+                        min_height = species_tree.ntips * 14  # More space for bar charts
+                        h = max(h, min_height)
+                        # Extra width for bar charts (GC% and Length)
+                        if has_stats:
+                            w = w + 400  # Add space for two bar chart columns
+
+                    if layout == "circular":
+                        # For circular layout, use reasonable size
+                        w = max(w, 600)
+                        h = max(h, 600)
+
+                        canvas, axes, mark = species_tree.draw(
+                            layout='c',
+                            edge_type='c',
+                            width=w,
+                            height=h,
+                            tip_labels=display_labels,
+                            tip_labels_colors=display_colors,
+                            tip_labels_style={"font-size": "8px"},
+                        )
+
+                        # Note: Radial bar charts are not added to circular layout
+                        # as they interfere with toytree's rendering.
+                        # Genome statistics (GC%, size) are available in the rectangular layout.
+                    else:
+                        # For rectangular layout with bar charts
+                        tree_width = w - 600 if has_stats else w - 400  # Leave room for bars and legend
+                        canvas, axes, mark = species_tree.draw(
+                            layout='r',
+                            width=tree_width,
+                            height=h,
+                            tip_labels=display_labels,
+                            tip_labels_colors=display_colors,
+                            tip_labels_style={"font-size": "9px"},
+                        )
+
+                    canvas.style = {"background-color": "white"}
+
+                    # Add bar charts for rectangular layout
+                    if layout == "rectangular" and has_stats:
+                        n_tips = len(display_labels)
+
+                        # Get y positions for tips (they are arranged 0 to n_tips-1 from bottom to top)
+                        # toytree arranges tips with index 0 at top, so we need to reverse
+                        tip_y_positions = np.arange(n_tips)
+
+                        # Calculate bar chart bounds
+                        tree_right_edge = tree_width - 200  # Approximate right edge of tree labels
+                        bar_width = 150
+                        bar_gap = 20
+
+                        gc_bar_left = tree_right_edge + 50
+                        gc_bar_right = gc_bar_left + bar_width
+
+                        length_bar_left = gc_bar_right + bar_gap
+                        length_bar_right = length_bar_left + bar_width
+
+                        # Calculate vertical bounds to match tree tips
+                        # Tips are positioned from 0 to n_tips-1, with margins
+                        top_margin = 60
+                        bottom_margin = 80
+                        available_height = h - top_margin - bottom_margin
+                        tip_spacing = available_height / max(n_tips - 1, 1)
+
+                        # Create GC% bar chart axes
+                        gc_axes = canvas.cartesian(
+                            bounds=(gc_bar_left, gc_bar_right, top_margin, h - bottom_margin),
+                            ymin=-0.5,
+                            ymax=n_tips - 0.5,
+                            xmin=0,
+                            xmax=60  # GC% typically 30-50% for bacteria
+                        )
+                        gc_axes.y.spine.show = False
+                        gc_axes.y.ticks.show = False
+                        gc_axes.x.label.text = "GC %"
+                        gc_axes.x.label.style = {"font-size": "10px"}
+                        gc_axes.x.ticks.locator = toyplot.locator.Explicit([0, 30, 60])
+
+                        # Create Length bar chart axes
+                        length_axes = canvas.cartesian(
+                            bounds=(length_bar_left, length_bar_right, top_margin, h - bottom_margin),
+                            ymin=-0.5,
+                            ymax=n_tips - 0.5,
+                            xmin=0,
+                            xmax=4  # Genome size typically 1-4 Mb for lactobacilli
+                        )
+                        length_axes.y.spine.show = False
+                        length_axes.y.ticks.show = False
+                        length_axes.x.label.text = "Size (Mb)"
+                        length_axes.x.label.style = {"font-size": "10px"}
+                        length_axes.x.ticks.locator = toyplot.locator.Explicit([0, 2, 4])
+
+                        # Draw bars for each species
+                        bar_height = 0.7
+                        for i in range(n_tips):
+                            # Tips are drawn top to bottom, so reverse the index
+                            y_pos = n_tips - 1 - i
+
+                            if species_gc_values[i] is not None:
+                                # GC% bar
+                                gc_axes.fill(
+                                    [0, species_gc_values[i], species_gc_values[i], 0],
+                                    [y_pos - bar_height/2, y_pos - bar_height/2, y_pos + bar_height/2, y_pos + bar_height/2],
+                                    color="#3498db",
+                                    opacity=0.8
+                                )
+
+                            if species_length_values[i] is not None:
+                                # Length bar
+                                length_axes.fill(
+                                    [0, species_length_values[i], species_length_values[i], 0],
+                                    [y_pos - bar_height/2, y_pos - bar_height/2, y_pos + bar_height/2, y_pos + bar_height/2],
+                                    color="#e74c3c",
+                                    opacity=0.8
+                                )
+
+                    # Add legend with genera
+                    legend_x = w - 380
+                    legend_y_start = 80
+
+                    canvas.text(
+                        legend_x, legend_y_start - 20,
+                        "Genus (species count)",
+                        style={"font-size": "12px", "font-weight": "bold", "text-anchor": "start"}
+                    )
+
+                    sorted_genera = sorted([g for g in species_genus_counts.keys() if g != "Unknown"])
+                    for i, genus in enumerate(sorted_genera):
+                        y_pos = legend_y_start + i * 18
+                        count = species_genus_counts[genus]
+                        canvas.text(
+                            legend_x, y_pos,
+                            f"{genus} (n={count})",
+                            style={"font-size": "10px", "fill": genus_colors.get(genus, "#808080"), "font-weight": "bold", "text-anchor": "start"}
+                        )
+
+                    if "Unknown" in species_genus_counts:
+                        y_pos = legend_y_start + len(sorted_genera) * 18
+                        canvas.text(
+                            legend_x, y_pos,
+                            f"Unknown (n={species_genus_counts['Unknown']})",
+                            style={"font-size": "10px", "fill": "#808080", "font-weight": "bold", "text-anchor": "start"}
+                        )
+
+                    # Add title indicating this is a species-level tree
+                    title_text = "Species-Level Phylogeny (collapsed by species)"
+                    if has_stats:
+                        title_text += " with Genome Statistics"
+                    canvas.text(
+                        w / 2, 30,
+                        title_text,
+                        style={"font-size": "14px", "font-weight": "bold", "text-anchor": "middle"}
+                    )
+
+                    toyplot.png.render(canvas, f"{filename}.png")
+                    toyplot.svg.render(canvas, f"{filename}.svg")
+                    toyplot.pdf.render(canvas, f"{filename}.pdf")
+                    print(f"    -> {filename}.[png,svg,pdf]")
+
+                render_species_tree("circular", "${sample_id}_species_circular")
+                render_species_tree("rectangular", "${sample_id}_species_rectangular")
+
+            except Exception as e:
+                print(f"Warning: Could not create species tree: {e}")
+        else:
+            print("Not enough tips to create species tree")
+    else:
+        print("No species mapping available, skipping species-level tree")
+else:
+    print("No species data loaded, skipping species-level tree")
+
 # Create stats file
 genera_list = "\\n".join([f"  - {g}" for g in unique_genera])
+
+# Species tree info
+species_tree_info = ""
+if species_data and len(species_per_tip) > 0:
+    species_tree_info = f\"\"\"
+Species-Level Tree:
+- Species with mapping: {len(species_per_tip)}
+- Unique species: {len(species_to_tips)}
+- Tips in species tree: {len(tips_to_keep)}
+\"\"\"
 
 with open("tree_stats.txt", "w") as f:
     f.write(f\"\"\"Tree Visualization Statistics
 ========================================
 Sample ID: ${sample_id}
 Tree file: ${tree_file}
-Tips: {tree.ntips}
-Unique genera: {len(unique_genera)}
-Taxonomy mappings: {len(taxonomy_map)}
-Unknown tips: {unknown_count}
 
+Genome-Level Tree:
+- Tips: {tree.ntips}
+- Unique genera: {len(unique_genera)}
+- Taxonomy mappings: {len(taxonomy_map)}
+- Unknown tips: {unknown_count}
+{species_tree_info}
 Genera:
 {genera_list}
 \"\"\")

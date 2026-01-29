@@ -7,7 +7,7 @@
 process BAKTA_PANGENOMICS {
     tag "$sample_id"
 
-    publishDir "${params.outdir}/${sample_id}/pangenomics/bakta", mode: 'copy'
+    publishDir "${params.outdir}/bakta/${sample_id}", mode: 'copy'
 
     container 'staphb/bakta:latest'
 

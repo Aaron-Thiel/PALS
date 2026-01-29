@@ -10,15 +10,21 @@ nextflow.enable.dsl=2
     then performs cohort-level pangenomics and phylogenetics.
 
     Pipeline steps:
-      1. BAKTA           - Annotate PASA scaffolds
+      1. BAKTA           - Annotate scaffolds (or load existing with --spades)
       2. CODON_QC        - Codon bias analysis (detects assembly anomalies)
-      3. PANTA_COHORT    - Cohort-level pangenome analysis
-      4. ANTISMASH       - BGC detection (parallel with PANTA)
-      5. PHYLOGENETICS   - Core gene tree (after PANTA)
-      6. EGGNOG          - Functional annotation (after PHYLOGENETICS)
-      7. PANGENOME_PLOTS - Visualizations (after EGGNOG)
+      3. MERGE_EXTERNAL  - Merge with external annotations (optional)
+      4. PREPARE_PANTA   - Collect GFF3s for cohort
+      5. PANTA_COHORT    - Cohort-level pangenome analysis
+      6. ANTISMASH       - BGC detection (parallel with PANTA)
+      7. PHYLOGENETICS   - Core gene tree (after PANTA)
+      8. EGGNOG          - Functional annotation (after PHYLOGENETICS)
+      9. PANGENOME_PLOTS - Visualizations (after EGGNOG)
 
-    Run with: nextflow run analysis.nf -c analysis.config
+    Run with: nextflow run analysis.nf -c analysis.config --internal results/assembly
+    SPAdes mode: nextflow run analysis.nf -c analysis.config --internal results/assembly --spades
+
+    Normal mode:  reads PASA scaffolds from <internal>/SAMPLE/pasa_filter/ and runs Bakta
+    SPAdes mode:  reads existing Bakta from <internal>/SAMPLE/bakta/ (skips Bakta annotation)
 
     Author: Created for BGC-link project
 ========================================================================================
@@ -53,6 +59,10 @@ params.internal = 'results/assembly_validation'
 // Optional: Pre-annotated external references directory (GFF3/FNA files, skip Bakta)
 params.external = null
 
+// Optional: Use pre-existing Bakta results from assembly pipeline (skip Bakta annotation)
+// When true, reads bakta results from params.internal/*/bakta/ instead of running Bakta
+params.spades = false
+
 // Enable/disable modules
 params.codon_qc_enable = true
 params.antismash_enable = true
@@ -72,9 +82,10 @@ workflow {
     Input sources:
       - Internal: ${params.internal}
       - External: ${params.external ?: 'None'}
+      - SPAdes mode: ${params.spades} ${params.spades ? '(using pre-existing Bakta from ' + params.internal + '/*/bakta/)' : ''}
 
     Modules enabled:
-      - BAKTA:           always (annotate scaffolds)
+      - BAKTA:           ${params.spades ? 'SKIPPED (using existing)' : 'yes (annotate scaffolds)'}
       - CODON_QC:        ${params.codon_qc_enable}
       - PANTA_COHORT:    always
       - ANTISMASH:       ${params.antismash_enable} (internal samples only)
@@ -87,21 +98,7 @@ workflow {
     """.stripIndent()
 
     // =========================================================================
-    // Step 1: Collect PASA scaffold FASTAs and run Bakta annotation
-    // =========================================================================
-
-    // Read PASA scaffolds from internal directory
-    // Searches for */pasa_filter/selected_scaffold.fasta within the internal directory
-    ch_scaffolds = channel
-        .fromPath("${params.internal}/*/pasa_filter/selected_scaffold.fasta", checkIfExists: true)
-        .map { fasta ->
-            // Extract sample_id from path: .../{sample_id}/pasa_filter/...
-            def sample_id = fasta.parent.parent.name
-            tuple(sample_id, fasta)
-        }
-
-    // =========================================================================
-    // Step 1b: Parse genus information from pipeline_summary.tsv
+    // Step 1: Collect inputs and run/load Bakta annotation
     // =========================================================================
 
     // Read pipeline_summary.tsv as a lookup table for taxonomy info
@@ -117,16 +114,63 @@ workflow {
             )
         }
 
-    // Run Bakta annotation on scaffolds
-    BAKTA(ch_scaffolds)
+    if (params.spades) {
+        // =====================================================================
+        // SPAdes mode: Use pre-existing Bakta results from assembly pipeline
+        // =====================================================================
+        log.info "SPAdes mode enabled: Loading pre-existing Bakta annotations from ${params.internal}/*/bakta/"
 
-    // Get GFF3 and FNA outputs from Bakta
-    ch_internal_gff = BAKTA.out.gff
-    ch_internal_fna = BAKTA.out.fna
-    ch_internal_ffn = BAKTA.out.nucleotides
+        // Read existing GFF3 files from assembly bakta output
+        ch_internal_gff = channel
+            .fromPath("${params.internal}/*/bakta/*.gff3", checkIfExists: true)
+            .map { gff ->
+                // Extract sample_id from filename (remove .gff3 extension)
+                def sample_id = gff.baseName
+                tuple(sample_id, gff)
+            }
+
+        // Read existing FNA files from assembly bakta output
+        ch_internal_fna = channel
+            .fromPath("${params.internal}/*/bakta/*.fna", checkIfExists: true)
+            .map { fna ->
+                def sample_id = fna.baseName
+                tuple(sample_id, fna)
+            }
+
+        // Read existing FFN files from assembly bakta output (for codon QC)
+        ch_internal_ffn = channel
+            .fromPath("${params.internal}/*/bakta/*.ffn", checkIfExists: true)
+            .map { ffn ->
+                def sample_id = ffn.baseName
+                tuple(sample_id, ffn)
+            }
+
+    } else {
+        // =====================================================================
+        // Normal mode: Run Bakta annotation on PASA scaffolds
+        // =====================================================================
+
+        // Read PASA scaffolds from internal directory
+        // Searches for */pasa_filter/selected_scaffold.fasta within the internal directory
+        ch_scaffolds = channel
+            .fromPath("${params.internal}/*/pasa_filter/selected_scaffold.fasta", checkIfExists: true)
+            .map { fasta ->
+                // Extract sample_id from path: .../{sample_id}/pasa_filter/...
+                def sample_id = fasta.parent.parent.name
+                tuple(sample_id, fasta)
+            }
+
+        // Run Bakta annotation on scaffolds
+        BAKTA(ch_scaffolds)
+
+        // Get GFF3 and FNA outputs from Bakta
+        ch_internal_gff = BAKTA.out.gff
+        ch_internal_fna = BAKTA.out.fna
+        ch_internal_ffn = BAKTA.out.nucleotides
+    }
 
     // =========================================================================
-    // Step 1c: Codon Bias QC (optional - detects assembly anomalies)
+    // Step 2: Codon Bias QC (optional - detects assembly anomalies)
     // =========================================================================
 
     if (params.codon_qc_enable) {
@@ -147,7 +191,7 @@ workflow {
     }
 
     // =========================================================================
-    // Step 2: Merge with external annotations (if provided)
+    // Step 3: Merge with external annotations (if provided)
     // =========================================================================
 
     // External annotations (optional) - these are pre-annotated, skip Bakta
@@ -173,7 +217,7 @@ workflow {
     }
 
     // =========================================================================
-    // Step 3: Prepare PANTA input (collect all GFF3s into cohort)
+    // Step 4: Prepare PANTA input (collect all GFF3s into cohort)
     // =========================================================================
 
     ch_all_gff
@@ -186,13 +230,13 @@ workflow {
         .set { ch_panta_input }
 
     // =========================================================================
-    // Step 4: Run PANTA_COHORT (pangenome analysis)
+    // Step 5: Run PANTA_COHORT (pangenome analysis)
     // =========================================================================
 
     PANTA_COHORT(ch_panta_input)
 
     // =========================================================================
-    // Step 5: Run ANTISMASH (parallel with PANTA) - internal samples only
+    // Step 6: Run ANTISMASH (parallel with PANTA) - internal samples only
     // =========================================================================
 
     if (params.antismash_enable) {
@@ -208,7 +252,7 @@ workflow {
     }
 
     // =========================================================================
-    // Step 6: Run PHYLOGENETICS (after PANTA)
+    // Step 7: Run PHYLOGENETICS (after PANTA)
     // =========================================================================
 
     ch_phylo_done = channel.empty()
@@ -232,7 +276,7 @@ workflow {
     }
 
     // =========================================================================
-    // Step 7: Run EGGNOG (after PHYLOGENETICS - runs last as it's slow)
+    // Step 8: Run EGGNOG (after PHYLOGENETICS - runs last as it's slow)
     // =========================================================================
 
     ch_eggnog_annotations = channel.empty()
@@ -254,7 +298,7 @@ workflow {
         ch_eggnog_annotations = EGGNOG.out.annotations
 
         // =====================================================================
-        // Step 8: Run PANGENOME_PLOTS (after EGGNOG)
+        // Step 9: Run PANGENOME_PLOTS (after EGGNOG)
         // =====================================================================
 
         PANTA_COHORT.out.rtab

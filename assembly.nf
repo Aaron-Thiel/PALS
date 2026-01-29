@@ -102,6 +102,12 @@ workflow {
           Max contamination: <${params.filter_max_contamination}%
           Family filter   : ${params.filter_family} (${params.filter_target_family})
 
+        SPAdes assembly:
+          Mode            : ${params.spades_mode ?: 'default'}
+          Coverage cutoff : ${params.spades_cov_cutoff ?: 'off'}
+          K-mers          : ${params.spades_kmers ?: 'auto'}
+          Extra args      : ${params.spades_extra_args ?: 'none'}
+
         PASA scaffolding:
           Mode            : ${params.pasa_mode}
           QC filter       : ${params.pasa_filter}
@@ -363,7 +369,7 @@ workflow {
 
     // Collect SPAdes QC JSON files (completeness/contamination before scaffolding)
     ch_spades_qc_files = QC_SPADES.out.checkm2_json
-        .map { sample_id, json_file -> json_file }
+        .map { _sample_id, json_file -> json_file }
         .collect()
         .ifEmpty(file('NO_SPADES_QC'))
 
@@ -371,19 +377,19 @@ workflow {
     // These channels are populated by QC_PASA_STANDARD and QC_PASA_SENSITIVE which run after PASA
     ch_pasa_qc_files = QC_PASA_STANDARD.out.checkm2_json
         .mix(QC_PASA_SENSITIVE.out.checkm2_json)
-        .map { sample_id, json_file -> json_file }
+        .map { _sample_id, json_file -> json_file }
         .collect()
         .ifEmpty(file('NO_PASA_QC'))
 
     // Collect Bakta JSON files for gene counts
     ch_bakta_files = BAKTA.out.json_report
-        .map { sample_id, json_file -> json_file }
+        .map { _sample_id, json_file -> json_file }
         .collect()
         .ifEmpty(file('NO_BAKTA'))
 
     // Collect selected reference CSV files
     ch_refs_files = ch_selected_references
-        .map { sample_id, csv_file -> csv_file }
+        .map { _sample_id, csv_file -> csv_file }
         .collect()
         .ifEmpty(file('NO_REFS'))
 

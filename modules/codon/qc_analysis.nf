@@ -9,7 +9,7 @@ process CODON_QC {
     tag "$meta.id"
     label 'process_low'
 
-    publishDir "${params.outdir}/codon_qc/${meta.id}", mode: 'copy'
+    publishDir "${params.outdir}/codon/${meta.id}", mode: 'copy'
 
     container 'quay.io/biocontainers/pandas:2.2.1'
     conda 'conda-forge::pandas conda-forge::numpy'

@@ -8,7 +8,7 @@
 process AGGREGATE_CODON_QC {
     label 'process_single'
 
-    publishDir "${params.outdir}/codon_qc", mode: 'copy'
+    publishDir "${params.outdir}/codon", mode: 'copy'
 
     container 'quay.io/biocontainers/pandas:2.2.1'
     conda 'conda-forge::pandas'

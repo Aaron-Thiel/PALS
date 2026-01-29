@@ -8,7 +8,7 @@
 process ANTISMASH {
     tag "$sample_id"
 
-    publishDir "${params.outdir}/${sample_id}/pangenomics/antismash", mode: 'copy'
+    publishDir "${params.outdir}/pangenomics/antismash/${sample_id}", mode: 'copy'
 
     // Use nanozoo antiSMASH container (includes procps for Nextflow metrics)
     container 'nanozoo/antismash:8.0.0--b6973cb'

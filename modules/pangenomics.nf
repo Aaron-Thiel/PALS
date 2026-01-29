@@ -44,7 +44,7 @@ workflow PANGENOMICS {
     // =========================================================================
 
     BAKTA_PANGENOMICS.out.gff
-        .map { sample_id, gff -> gff }
+        .map { _sample_id, gff -> gff }
         .collect()
         .map { gff_list ->
             def count = gff_list.size()
@@ -74,12 +74,12 @@ workflow PANGENOMICS {
     // =========================================================================
 
     // Initialize empty channels for conditional outputs
-    ch_eggnog_annotations = Channel.empty()
-    ch_eggnog_hits = Channel.empty()
-    ch_eggnog_orthologs = Channel.empty()
-    ch_plots_dir = Channel.empty()
-    ch_pangenome_summary = Channel.empty()
-    ch_pangenome_statistics = Channel.empty()
+    ch_eggnog_annotations = channel.empty()
+    ch_eggnog_hits = channel.empty()
+    ch_eggnog_orthologs = channel.empty()
+    ch_plots_dir = channel.empty()
+    ch_pangenome_summary = channel.empty()
+    ch_pangenome_statistics = channel.empty()
 
     if (params.eggnog_enable) {
         EGGNOG(PANTA_COHORT.out.panta_dir)

@@ -15,7 +15,6 @@ process SOURMASH {
     tuple val(sample_id), path(genome_fasta)
     
     output:
-    tuple val(sample_id), path("sourmash_output"), emit: sourmash_results
     tuple val(sample_id), path("sourmash_summary.txt"), emit: summary
     tuple val(sample_id), path("*.json"), emit: json_reports
     tuple val(sample_id), path("classification.txt"), emit: classification
@@ -33,10 +32,7 @@ process SOURMASH {
     
     # Set up database paths (databases should be pre-installed)
     SOURMASH_DB_DIR="/databases/sourmash"
-    
-    # Create output directory
-    mkdir -p sourmash_output
-    
+
     # Run sourmash gather for classification using k=31 database
     # Note: --output-dir not available in sourmash 2.3.0, using -o only
     sourmash gather \\

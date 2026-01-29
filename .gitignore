@@ -1,10 +1,14 @@
-.nextflow/
+/.claude/
+/.nextflow/
+/.vscode/
 /databases/
 /del/
 /input/
-/results*/
-/validation*/
+/results/
+/scripts/
+/test/
 /work/
 
 *.log*
 *.tmp
+sweep*
