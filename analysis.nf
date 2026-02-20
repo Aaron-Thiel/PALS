@@ -5,69 +5,49 @@ nextflow.enable.dsl=2
 ========================================================================================
     BGC-link Analysis Pipeline
 ========================================================================================
-    Downstream analysis pipeline for pangenomics and phylogenetics.
-    Takes PASA scaffold FASTAs from assembly pipeline, annotates with Bakta,
-    then performs cohort-level pangenomics and phylogenetics.
+    Modular analysis pipeline for pangenomics, phylogenetics, and BGC analysis.
 
-    Pipeline steps:
-      1. BAKTA           - Annotate scaffolds (or load existing with --spades)
-      2. CODON_QC        - Codon bias analysis (detects assembly anomalies)
-      3. MERGE_EXTERNAL  - Merge with external annotations (optional)
-      4. PREPARE_PANTA   - Collect GFF3s for cohort
-      5. PANTA_COHORT    - Cohort-level pangenome analysis
-      6. ANTISMASH       - BGC detection (parallel with PANTA)
-      7. PHYLOGENETICS   - Core gene tree (after PANTA)
-      8. EGGNOG          - Functional annotation (after PHYLOGENETICS)
-      9. PANGENOME_PLOTS - Visualizations (after EGGNOG)
+    Architecture:
+      CORE (always runs):
+        BAKTA → MERGE_EXTERNAL → PANTA_COHORT (auto-detects cache)
+
+      DOWNSTREAM BLOCKS (independent, optional):
+        --codon_qc_enable       Codon bias QC
+        --pangenomics_enable    EGGNOG + pangenome plots
+        --phylogenetics_enable  Core gene tree
+        --bgc_enable            antiSMASH BGC detection
+        --new_genes_enable      GenomeViz scaffold vs reference
+
+      SUBSET ANALYSIS (--subset_analysis_enable):
+        When enabled, adds genus/species-level analysis within each block:
+        pangenomics  → subset Rtab + plots per genus/species
+        phylogenetics → subtree pruning per genus/species
+        bgc          → BiG-SCAPE networks per genus/species
+        new_genes    → aggregated overview per family/genus/species
 
     Run with: nextflow run analysis.nf -c analysis.config --internal results/assembly
-    SPAdes mode: nextflow run analysis.nf -c analysis.config --internal results/assembly --spades
-
-    Normal mode:  reads PASA scaffolds from <internal>/SAMPLE/pasa_filter/ and runs Bakta
-    SPAdes mode:  reads existing Bakta from <internal>/SAMPLE/bakta/ (skips Bakta annotation)
+    SPAdes:   nextflow run analysis.nf -c analysis.config --internal results/assembly --spades
 
     Author: Created for BGC-link project
 ========================================================================================
 */
 
-// Import annotation module
+// =========================================================================
+// Import core processes
+// =========================================================================
+
 include { BAKTA } from './modules/bakta'
-
-// Import codon QC workflow
-include { CODON_BIAS_QC } from './modules/codon.nf'
-
-// Import pangenomics modules
 include { PANTA_COHORT } from './modules/pangenomics/panta_cohort.nf'
-include { EGGNOG } from './modules/pangenomics/eggnog.nf'
-include { ANTISMASH } from './modules/pangenomics/antismash.nf'
-include { PANGENOME_PLOTS } from './modules/pangenomics/plotting.nf'
-
-// Import phylogenetics workflow
-include { PHYLOGENETICS } from './modules/phylogenetics.nf'
 
 // =========================================================================
-// Parameters (defaults - override in analysis.config)
+// Import downstream blocks
 // =========================================================================
 
-params.outdir = 'results/analysis'
-
-// Input: Directory containing assembly pipeline results
-// Will search for */pasa_filter/selected_scaffold.fasta within this directory
-// Also reads pipeline_summary.tsv from this directory for genus information
-params.internal = 'results/assembly_validation'
-
-// Optional: Pre-annotated external references directory (GFF3/FNA files, skip Bakta)
-params.external = null
-
-// Optional: Use pre-existing Bakta results from assembly pipeline (skip Bakta annotation)
-// When true, reads bakta results from params.internal/*/bakta/ instead of running Bakta
-params.spades = false
-
-// Enable/disable modules
-params.codon_qc_enable = true
-params.antismash_enable = true
-params.eggnog_enable = true
-params.phylogenetics_enable = true
+include { CODON_BLOCK } from './workflows/codon_bias'
+include { PANGENOMICS_BLOCK } from './workflows/pangenomics'
+include { PHYLOGENETICS_BLOCK } from './workflows/phylogenetics'
+include { BGC_BLOCK } from './workflows/bgc'
+include { NEW_GENES_BLOCK } from './workflows/new_genes'
 
 // =========================================================================
 // Main Workflow
@@ -79,136 +59,76 @@ workflow {
     ===================================
     BGC-link Analysis Pipeline
     ===================================
-    Input sources:
-      - Internal: ${params.internal}
-      - External: ${params.external ?: 'None'}
-      - SPAdes mode: ${params.spades} ${params.spades ? '(using pre-existing Bakta from ' + params.internal + '/*/bakta/)' : ''}
+    Input:  ${params.internal}${params.external ? ' + ' + params.external : ''}
+    Mode:   ${params.spades ? 'SPAdes (pre-existing Bakta)' : 'Normal (PASA scaffolds → Bakta)'}
+    Output: ${params.outdir}
 
-    Modules enabled:
-      - BAKTA:           ${params.spades ? 'SKIPPED (using existing)' : 'yes (annotate scaffolds)'}
-      - CODON_QC:        ${params.codon_qc_enable}
-      - PANTA_COHORT:    always
-      - ANTISMASH:       ${params.antismash_enable} (internal samples only)
-      - EGGNOG:          ${params.eggnog_enable}
-      - PANGENOME_PLOTS: ${params.eggnog_enable} (requires EGGNOG)
-      - PHYLOGENETICS:   ${params.phylogenetics_enable}
-
-    Output directory: ${params.outdir}
+    Blocks:
+      Codon QC:       ${params.codon_qc_enable}
+      Codon Correlation: ${params.codon_correlation_enable}
+      Pangenomics:    ${params.pangenomics_enable}
+      Phylogenetics:  ${params.phylogenetics_enable}
+      BGC:            ${params.bgc_enable}
+      New Genes:      ${params.new_genes_enable && !params.spades}
+      Subset analysis: ${params.subset_analysis_enable}
+      HQ Plots:       ${params.hq_plots_enable}${params.hq_plots_enable ? ' (min ' + params.scaffold_min_completeness + '%)' : ''}
     ===================================
     """.stripIndent()
 
-    // =========================================================================
-    // Step 1: Collect inputs and run/load Bakta annotation
-    // =========================================================================
+    // =====================================================================
+    // Shared input channels
+    // =====================================================================
 
-    // Read pipeline_summary.tsv as a lookup table for taxonomy info
     ch_internal_taxonomy = channel
         .fromPath("${params.internal}/pipeline_summary.tsv", checkIfExists: true)
         .splitCsv(header: true, sep: '\t')
         .map { row ->
-            tuple(
-                row.sample_id,
-                row.family ?: 'Unknown',
-                row.genus ?: 'Unknown',
-                row.species ?: 'Unknown'
-            )
+            tuple(row.sample_id, row.family ?: 'Unknown', row.genus ?: 'Unknown', row.species ?: 'Unknown')
         }
 
+    ch_pipeline_summary = channel
+        .fromPath("${params.internal}/pipeline_summary.tsv", checkIfExists: true)
+
+    ch_taxonomy_csv = channel
+        .fromPath(params.taxonomy_csv, checkIfExists: true)
+
+    // =====================================================================
+    // CORE: Resolve Bakta annotations
+    // =====================================================================
+
     if (params.spades) {
-        // =====================================================================
-        // SPAdes mode: Use pre-existing Bakta results from assembly pipeline
-        // =====================================================================
-        log.info "SPAdes mode enabled: Loading pre-existing Bakta annotations from ${params.internal}/*/bakta/"
-
-        // Read existing GFF3 files from assembly bakta output
-        ch_internal_gff = channel
-            .fromPath("${params.internal}/*/bakta/*.gff3", checkIfExists: true)
-            .map { gff ->
-                // Extract sample_id from filename (remove .gff3 extension)
-                def sample_id = gff.baseName
-                tuple(sample_id, gff)
-            }
-
-        // Read existing FNA files from assembly bakta output
-        ch_internal_fna = channel
-            .fromPath("${params.internal}/*/bakta/*.fna", checkIfExists: true)
-            .map { fna ->
-                def sample_id = fna.baseName
-                tuple(sample_id, fna)
-            }
-
-        // Read existing FFN files from assembly bakta output (for codon QC)
-        ch_internal_ffn = channel
-            .fromPath("${params.internal}/*/bakta/*.ffn", checkIfExists: true)
-            .map { ffn ->
-                def sample_id = ffn.baseName
-                tuple(sample_id, ffn)
-            }
-
+        ch_internal_gff = channel.fromPath("${params.internal}/*/bakta/*.gff3", checkIfExists: true)
+            .map { gff -> tuple(gff.baseName, gff) }
+        ch_internal_fna = channel.fromPath("${params.internal}/*/bakta/*.fna", checkIfExists: true)
+            .map { fna -> tuple(fna.baseName, fna) }
+        ch_internal_ffn = channel.fromPath("${params.internal}/*/bakta/*.ffn", checkIfExists: true)
+            .map { ffn -> tuple(ffn.baseName, ffn) }
+        ch_internal_faa = channel.fromPath("${params.internal}/*/bakta/*.faa", checkIfExists: true)
+            .map { faa -> tuple(faa.baseName, faa) }
     } else {
-        // =====================================================================
-        // Normal mode: Run Bakta annotation on PASA scaffolds
-        // =====================================================================
-
-        // Read PASA scaffolds from internal directory
-        // Searches for */pasa_filter/selected_scaffold.fasta within the internal directory
         ch_scaffolds = channel
             .fromPath("${params.internal}/*/pasa_filter/selected_scaffold.fasta", checkIfExists: true)
-            .map { fasta ->
-                // Extract sample_id from path: .../{sample_id}/pasa_filter/...
-                def sample_id = fasta.parent.parent.name
-                tuple(sample_id, fasta)
-            }
+            .map { fasta -> tuple(fasta.parent.parent.name, fasta) }
 
-        // Run Bakta annotation on scaffolds
         BAKTA(ch_scaffolds)
 
-        // Get GFF3 and FNA outputs from Bakta
         ch_internal_gff = BAKTA.out.gff
         ch_internal_fna = BAKTA.out.fna
         ch_internal_ffn = BAKTA.out.nucleotides
+        ch_internal_faa = BAKTA.out.proteins
     }
 
-    // =========================================================================
-    // Step 2: Codon Bias QC (optional - detects assembly anomalies)
-    // =========================================================================
+    // =====================================================================
+    // CORE: Merge external annotations
+    // =====================================================================
 
-    if (params.codon_qc_enable) {
-        // Prepare samples with taxonomy info for codon QC
-        // Join BAKTA FFN outputs with taxonomy from pipeline_summary.tsv
-        ch_codon_samples = ch_internal_ffn
-            .join(ch_internal_taxonomy)
-            .map { sample_id, ffn, family, genus, species ->
-                def f = (family && family != 'NA' && family != '') ? family : 'Unknown'
-                def g = (genus && genus != 'NA' && genus != '') ? genus : 'Unknown'
-                def s = (species && species != 'NA' && species != '') ? species : 'Unknown'
-                [[id: sample_id, family: f, genus: g, species: s], ffn]
-            }
-
-        // Run codon bias QC workflow
-        // Compares samples against species-level (preferred) or genus-level references
-        CODON_BIAS_QC(ch_codon_samples)
-    }
-
-    // =========================================================================
-    // Step 3: Merge with external annotations (if provided)
-    // =========================================================================
-
-    // External annotations (optional) - these are pre-annotated, skip Bakta
-    // Supports both flat structure (*.gff3) and nested structure (*/*.gff3)
     if (params.external) {
         ch_external_gff = channel
             .fromPath(["${params.external}/*.gff3", "${params.external}/**/*.gff3"], checkIfExists: false)
-            .map { gff ->
-                def sample_id = gff.baseName
-                tuple(sample_id, gff)
-            }
+            .map { gff -> tuple(gff.baseName, gff) }
         ch_external_fna = channel
             .fromPath(["${params.external}/*.fna", "${params.external}/**/*.fna"], checkIfExists: false)
-            .map { fna ->
-                def sample_id = fna.baseName
-                tuple(sample_id, fna)
-            }
+            .map { fna -> tuple(fna.baseName, fna) }
         ch_all_gff = ch_internal_gff.mix(ch_external_gff)
         ch_all_fna = ch_internal_fna.mix(ch_external_fna)
     } else {
@@ -216,101 +136,138 @@ workflow {
         ch_all_fna = ch_internal_fna
     }
 
-    // =========================================================================
-    // Step 4: Prepare PANTA input (collect all GFF3s into cohort)
-    // =========================================================================
+    // =====================================================================
+    // CORE: PANTA pangenome analysis (auto-detect cache)
+    // =====================================================================
 
-    ch_all_gff
-        .map { _sample_id, gff -> gff }
-        .collect()
-        .map { gff_list ->
-            def count = gff_list.size()
-            tuple("pangenomics_cohort", gff_list, count)
-        }
-        .set { ch_panta_input }
+    def cached_rtab = file("${params.outdir}/pangenomics/panta/panta_results/gene_presence_absence.Rtab")
 
-    // =========================================================================
-    // Step 5: Run PANTA_COHORT (pangenome analysis)
-    // =========================================================================
+    if (cached_rtab.exists()) {
+        log.info "Found cached PANTA results at ${params.outdir}/pangenomics/panta/"
+        def panta_path = file("${params.outdir}/pangenomics/panta/panta_results")
+        def sample_count = cached_rtab.readLines()[0].split('\t').length - 1
 
-    PANTA_COHORT(ch_panta_input)
+        ch_panta_dir    = Channel.of(tuple("pangenomics_cohort", panta_path))
+        ch_rtab         = Channel.of(tuple("pangenomics_cohort", cached_rtab))
+        ch_sample_count = Channel.of(tuple("pangenomics_cohort", sample_count))
+    } else {
+        ch_all_gff
+            .map { _sample_id, gff -> gff }
+            .collect()
+            .map { gff_list -> tuple("pangenomics_cohort", gff_list, gff_list.size()) }
+            .set { ch_panta_input }
 
-    // =========================================================================
-    // Step 6: Run ANTISMASH (parallel with PANTA) - internal samples only
-    // =========================================================================
+        PANTA_COHORT(ch_panta_input)
 
-    if (params.antismash_enable) {
-        // Join FNA and GFF by sample_id - only internal samples (not external)
-        ch_internal_fna
-            .join(ch_internal_gff)
-            .map { sample_id, fna, gff ->
-                tuple(sample_id, fna, gff)
-            }
-            .set { ch_antismash_input }
-
-        ANTISMASH(ch_antismash_input)
+        ch_panta_dir    = PANTA_COHORT.out.panta_dir
+        ch_rtab         = PANTA_COHORT.out.rtab
+        ch_sample_count = PANTA_COHORT.out.sample_count
     }
 
-    // =========================================================================
-    // Step 7: Run PHYLOGENETICS (after PANTA)
-    // =========================================================================
+    // =====================================================================
+    // DOWNSTREAM BLOCKS
+    // =====================================================================
 
-    ch_phylo_done = channel.empty()
+    if (params.codon_qc_enable) {
+        ch_gpa_csv = ch_panta_dir
+            .map { _cohort_id, panta_dir -> file("${panta_dir}/gene_presence_absence.csv") }
+
+        CODON_BLOCK(
+            ch_internal_ffn, ch_internal_taxonomy,
+            ch_rtab,
+            ch_pipeline_summary.first(), ch_taxonomy_csv.first(),
+            ch_gpa_csv.first()
+        )
+    }
+
+    if (params.pangenomics_enable) {
+        PANGENOMICS_BLOCK(
+            ch_panta_dir, ch_rtab,
+            ch_pipeline_summary.first(), ch_taxonomy_csv.first()
+        )
+    }
 
     if (params.phylogenetics_enable) {
-        // Collect internal genus mapping to a single TSV file for tree visualization
-        ch_internal_taxonomy
-            .map { sample_id, _family, genus, _species -> [sample_id, genus] }
-            .collectFile(name: 'internal_genus_map.tsv', storeDir: "${params.outdir}/phylogenetics") { sample_id, genus ->
-                "${sample_id}\t${genus}\n"
-            }
-            .set { ch_genus_map_file }
-
-        PHYLOGENETICS(
-            PANTA_COHORT.out.panta_dir,
-            PANTA_COHORT.out.sample_count,
-            ch_genus_map_file
+        PHYLOGENETICS_BLOCK(
+            ch_panta_dir, ch_sample_count, ch_internal_taxonomy,
+            ch_taxonomy_csv.first(), ch_pipeline_summary.first()
         )
-        // Use tree output as signal that phylogenetics is done
-        ch_phylo_done = PHYLOGENETICS.out.tree
     }
 
-    // =========================================================================
-    // Step 8: Run EGGNOG (after PHYLOGENETICS - runs last as it's slow)
-    // =========================================================================
+    if (params.bgc_enable) {
+        BGC_BLOCK(ch_internal_fna, ch_internal_gff, ch_pipeline_summary.first())
+    }
 
-    ch_eggnog_annotations = channel.empty()
-
-    if (params.eggnog_enable) {
-        if (params.phylogenetics_enable) {
-            // Wait for phylogenetics to complete before starting EggNOG
-            // Combine panta_dir with phylo completion signal
-            PANTA_COHORT.out.panta_dir
-                .combine(ch_phylo_done.map { _it -> true }.first())
-                .map { cohort_id, panta_dir, _done -> tuple(cohort_id, panta_dir) }
-                .set { ch_eggnog_input }
-
-            EGGNOG(ch_eggnog_input)
-        } else {
-            // If phylogenetics disabled, run EggNOG directly after PANTA
-            EGGNOG(PANTA_COHORT.out.panta_dir)
-        }
-        ch_eggnog_annotations = EGGNOG.out.annotations
-
-        // =====================================================================
-        // Step 9: Run PANGENOME_PLOTS (after EGGNOG)
-        // =====================================================================
-
-        PANTA_COHORT.out.rtab
-            .join(EGGNOG.out.annotations)
-            .map { cohort_id, rtab_file, eggnog_annot ->
-                tuple(cohort_id, rtab_file, eggnog_annot)
+    if (params.new_genes_enable && !params.spades) {
+        // Resolve reference paths from pipeline_summary
+        ch_genomeviz_taxonomy = channel
+            .fromPath("${params.internal}/pipeline_summary.tsv", checkIfExists: true)
+            .splitCsv(header: true, sep: '\t')
+            .map { row -> tuple(row.sample_id, row.genus ?: '', row.species ?: '', row.best_reference ?: '') }
+            .filter { _id, genus, _sp, ref ->
+                genus && genus != 'NA' && genus != '' && ref && ref != 'NA' && ref != ''
             }
-            .set { ch_plotting_input }
 
-        PANGENOME_PLOTS(ch_plotting_input)
+        // Contig annotations (assembly bakta, pre-PASA)
+        ch_contig_fna = channel.fromPath("${params.internal}/*/bakta/*.fna", checkIfExists: true)
+            .map { fna -> tuple(fna.baseName, fna) }
+        ch_contig_gff = channel.fromPath("${params.internal}/*/bakta/*.gff3", checkIfExists: true)
+            .map { gff -> tuple(gff.baseName, gff) }
+        ch_contig_faa = channel.fromPath("${params.internal}/*/bakta/*.faa", checkIfExists: true)
+            .map { faa -> tuple(faa.baseName, faa) }
+
+        // Build 9-tuple for GENE_COMPARISON (scaffold vs contig)
+        ch_genomeviz_taxonomy
+            .map { sample_id, genus, species, best_ref ->
+                def ref_fna = file("${params.reference_genomes_dir}/${genus}/${species}/${best_ref}.fna")
+                def ref_gff = file("${params.reference_genomes_dir}/${genus}/${species}/${best_ref}.gff3")
+                tuple(sample_id, ref_fna, ref_gff)
+            }
+            .filter { _id, fna, gff -> fna.exists() && gff.exists() }
+            .join(ch_internal_fna).join(ch_internal_gff).join(ch_internal_faa)
+            .join(ch_contig_fna).join(ch_contig_gff).join(ch_contig_faa)
+            .map { sample_id, ref_fna, ref_gff, scaffold_fna, scaffold_gff, scaffold_faa,
+                   contig_fna, contig_gff, contig_faa ->
+                tuple(sample_id, scaffold_fna, scaffold_gff, scaffold_faa,
+                      ref_fna, ref_gff, contig_fna, contig_gff, contig_faa)
+            }
+            .set { ch_genomeviz_input }
+
+        // Build skani + metadata channel for SELECT_COMPLETE_REFERENCE
+        // genome_dir is the original database path (not staged) for resolving relative paths in metadata
+        ch_genomeviz_taxonomy
+            .map { sample_id, genus, _species, _best_ref ->
+                def ani_tsv = file("${params.internal}/${sample_id}/classification/skani/ani_results.tsv")
+                def metadata_csv = file("${params.reference_genomes_dir}/${genus}/genome_metadata.csv")
+                def genome_dir = "${params.reference_genomes_dir}/${genus}"
+                (ani_tsv.exists() && metadata_csv.exists()) ? tuple(sample_id, ani_tsv, metadata_csv, genome_dir) : null
+            }
+            .filter { it != null }
+            .set { ch_skani_metadata }
+
+        // Derive PANTA gene_presence_absence.csv from panta_dir
+        ch_gene_presence_absence_csv = ch_panta_dir
+            .map { _cohort_id, panta_dir -> file("${panta_dir}/gene_presence_absence.csv") }
+
+        // EggNOG annotations (auto-detect from cache, fallback to NO_EGGNOG)
+        def cached_eggnog = file("${params.outdir}/pangenomics/eggnog/pangenomics_cohort.emapper.annotations")
+        if (cached_eggnog.exists()) {
+            ch_eggnog_for_newgenes = Channel.of(cached_eggnog)
+        } else {
+            log.warn "  [new_genes] EggNOG annotations not found at ${cached_eggnog}. COG analysis will be skipped."
+            ch_eggnog_for_newgenes = Channel.of(file("NO_EGGNOG"))
+        }
+
+        // Rtab file for pangenome-wide COG baseline
+        ch_rtab_file = ch_rtab.map { _cohort_id, rtab -> rtab }
+
+        NEW_GENES_BLOCK(
+            ch_genomeviz_input,
+            ch_skani_metadata,
+            ch_pipeline_summary.first(),
+            ch_gene_presence_absence_csv.first(),
+            ch_eggnog_for_newgenes.first(),
+            ch_rtab_file.first()
+        )
     }
-
-    // Log completion
-    log.info "Analysis pipeline submitted - check Nextflow output for progress"
 }

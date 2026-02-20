@@ -16,15 +16,15 @@ process TREE_VISUALIZATION {
 
     publishDir "${params.outdir}/phylogenetics/tree/visualizations", mode: 'copy'
 
-    conda 'bioconda::toytree conda-forge::toyplot conda-forge::pandas conda-forge::ghostscript'
+    container 'aaronthiel/tree-viz:latest'
 
     input:
     tuple val(sample_id), path(tree_file), path(internal_genus_map)
 
     output:
-    tuple val(sample_id), path("${sample_id}_circular.png"), path("${sample_id}_rectangular.png"), emit: png
-    tuple val(sample_id), path("${sample_id}_circular.svg"), path("${sample_id}_rectangular.svg"), emit: svg
-    tuple val(sample_id), path("${sample_id}_circular.pdf"), path("${sample_id}_rectangular.pdf"), emit: pdf
+    tuple val(sample_id), path("${sample_id}_circular.png"), path("${sample_id}_rectangular.png"), emit: png, optional: true
+    tuple val(sample_id), path("${sample_id}_circular.svg"), path("${sample_id}_rectangular.svg"), emit: svg, optional: true
+    tuple val(sample_id), path("${sample_id}_circular.pdf"), path("${sample_id}_rectangular.pdf"), emit: pdf, optional: true
     tuple val(sample_id), path("${sample_id}_species_circular.png"), path("${sample_id}_species_rectangular.png"), emit: species_png, optional: true
     tuple val(sample_id), path("${sample_id}_species_circular.svg"), path("${sample_id}_species_rectangular.svg"), emit: species_svg, optional: true
     tuple val(sample_id), path("${sample_id}_species_circular.pdf"), path("${sample_id}_species_rectangular.pdf"), emit: species_pdf, optional: true
@@ -41,9 +41,7 @@ import toyplot
 import toyplot.png
 import toyplot.svg
 import toyplot.pdf
-import toyplot.locator
 import pandas as pd
-import numpy as np
 import os
 
 print("=" * 50)
@@ -103,29 +101,6 @@ print(f"Total taxonomy mappings: {len(taxonomy_map)}")
 taxonomy_map.to_csv("taxonomy_mapping.tsv", sep="\\t", index=False)
 
 # ========================================
-# Load genome statistics for bar charts
-# ========================================
-print("\\nLoading genome statistics for bar charts...")
-genome_stats_file = '/BGC-data/A/nextflow/del/coverage/genome_stats_species.tsv'
-genome_stats = {}
-if os.path.exists(genome_stats_file):
-    try:
-        stats_df = pd.read_csv(genome_stats_file, sep='\\t')
-        # Create mapping from species to stats
-        for _, row in stats_df.iterrows():
-            species = row['species']
-            genome_stats[species] = {
-                'gc_mean': row['gc_mean'],
-                'length_mean': row['length_mean'] / 1_000_000,  # Convert to Mb
-                'n_genomes': row['n_genomes']
-            }
-        print(f"  Loaded genome stats for {len(genome_stats)} species")
-    except Exception as e:
-        print(f"  Warning: Could not load genome stats: {e}")
-else:
-    print(f"  Genome stats file not found: {genome_stats_file}")
-
-# ========================================
 # Create color mapping for genera
 # ========================================
 unique_genera = sorted(taxonomy_map['genus'].unique())
@@ -170,6 +145,9 @@ for genus in tip_genera:
 
 # Create simple visualizations
 def render_tree(layout, filename):
+    if tree.ntips < 3:
+        print(f"  Skipping {layout} tree: only {tree.ntips} tip(s), need at least 3")
+        return
     print(f"  Generating {layout} tree...")
 
     # Draw tree - circular needs edge_type='c'
@@ -416,35 +394,6 @@ if species_data:
                     # Count species per genus
                     species_genus_counts[genus] = species_genus_counts.get(genus, 0) + 1
 
-                # Collect stats for species in the tree
-                species_gc_values = []
-                species_length_values = []
-                species_with_stats = []
-
-                for tip, species_name in zip(species_tip_labels, display_labels):
-                    # Try to find stats with different name formats
-                    stats = None
-                    # Try species name with underscore
-                    species_key = species_name.replace(' ', '_')
-                    if species_key in genome_stats:
-                        stats = genome_stats[species_key]
-                    elif species_name in genome_stats:
-                        stats = genome_stats[species_name]
-
-                    if stats:
-                        species_gc_values.append(stats['gc_mean'])
-                        species_length_values.append(stats['length_mean'])
-                        species_with_stats.append(species_name)
-                    else:
-                        species_gc_values.append(None)
-                        species_length_values.append(None)
-
-                has_stats = any(v is not None for v in species_gc_values)
-                if has_stats:
-                    print(f"  Found genome stats for {len(species_with_stats)}/{len(display_labels)} species")
-                else:
-                    print("  No genome stats available for bar charts")
-
                 # Render species tree
                 def render_species_tree(layout, filename):
                     print(f"  Generating {layout} species tree...")
@@ -453,14 +402,10 @@ if species_data:
                     h = ${height}
 
                     if layout == "rectangular":
-                        min_height = species_tree.ntips * 14  # More space for bar charts
+                        min_height = species_tree.ntips * 14
                         h = max(h, min_height)
-                        # Extra width for bar charts (GC% and Length)
-                        if has_stats:
-                            w = w + 400  # Add space for two bar chart columns
 
                     if layout == "circular":
-                        # For circular layout, use reasonable size
                         w = max(w, 600)
                         h = max(h, 600)
 
@@ -473,16 +418,10 @@ if species_data:
                             tip_labels_colors=display_colors,
                             tip_labels_style={"font-size": "8px"},
                         )
-
-                        # Note: Radial bar charts are not added to circular layout
-                        # as they interfere with toytree's rendering.
-                        # Genome statistics (GC%, size) are available in the rectangular layout.
                     else:
-                        # For rectangular layout with bar charts
-                        tree_width = w - 600 if has_stats else w - 400  # Leave room for bars and legend
                         canvas, axes, mark = species_tree.draw(
                             layout='r',
-                            width=tree_width,
+                            width=w,
                             height=h,
                             tip_labels=display_labels,
                             tip_labels_colors=display_colors,
@@ -491,85 +430,7 @@ if species_data:
 
                     canvas.style = {"background-color": "white"}
 
-                    # Add bar charts for rectangular layout
-                    if layout == "rectangular" and has_stats:
-                        n_tips = len(display_labels)
-
-                        # Get y positions for tips (they are arranged 0 to n_tips-1 from bottom to top)
-                        # toytree arranges tips with index 0 at top, so we need to reverse
-                        tip_y_positions = np.arange(n_tips)
-
-                        # Calculate bar chart bounds
-                        tree_right_edge = tree_width - 200  # Approximate right edge of tree labels
-                        bar_width = 150
-                        bar_gap = 20
-
-                        gc_bar_left = tree_right_edge + 50
-                        gc_bar_right = gc_bar_left + bar_width
-
-                        length_bar_left = gc_bar_right + bar_gap
-                        length_bar_right = length_bar_left + bar_width
-
-                        # Calculate vertical bounds to match tree tips
-                        # Tips are positioned from 0 to n_tips-1, with margins
-                        top_margin = 60
-                        bottom_margin = 80
-                        available_height = h - top_margin - bottom_margin
-                        tip_spacing = available_height / max(n_tips - 1, 1)
-
-                        # Create GC% bar chart axes
-                        gc_axes = canvas.cartesian(
-                            bounds=(gc_bar_left, gc_bar_right, top_margin, h - bottom_margin),
-                            ymin=-0.5,
-                            ymax=n_tips - 0.5,
-                            xmin=0,
-                            xmax=60  # GC% typically 30-50% for bacteria
-                        )
-                        gc_axes.y.spine.show = False
-                        gc_axes.y.ticks.show = False
-                        gc_axes.x.label.text = "GC %"
-                        gc_axes.x.label.style = {"font-size": "10px"}
-                        gc_axes.x.ticks.locator = toyplot.locator.Explicit([0, 30, 60])
-
-                        # Create Length bar chart axes
-                        length_axes = canvas.cartesian(
-                            bounds=(length_bar_left, length_bar_right, top_margin, h - bottom_margin),
-                            ymin=-0.5,
-                            ymax=n_tips - 0.5,
-                            xmin=0,
-                            xmax=4  # Genome size typically 1-4 Mb for lactobacilli
-                        )
-                        length_axes.y.spine.show = False
-                        length_axes.y.ticks.show = False
-                        length_axes.x.label.text = "Size (Mb)"
-                        length_axes.x.label.style = {"font-size": "10px"}
-                        length_axes.x.ticks.locator = toyplot.locator.Explicit([0, 2, 4])
-
-                        # Draw bars for each species
-                        bar_height = 0.7
-                        for i in range(n_tips):
-                            # Tips are drawn top to bottom, so reverse the index
-                            y_pos = n_tips - 1 - i
-
-                            if species_gc_values[i] is not None:
-                                # GC% bar
-                                gc_axes.fill(
-                                    [0, species_gc_values[i], species_gc_values[i], 0],
-                                    [y_pos - bar_height/2, y_pos - bar_height/2, y_pos + bar_height/2, y_pos + bar_height/2],
-                                    color="#3498db",
-                                    opacity=0.8
-                                )
-
-                            if species_length_values[i] is not None:
-                                # Length bar
-                                length_axes.fill(
-                                    [0, species_length_values[i], species_length_values[i], 0],
-                                    [y_pos - bar_height/2, y_pos - bar_height/2, y_pos + bar_height/2, y_pos + bar_height/2],
-                                    color="#e74c3c",
-                                    opacity=0.8
-                                )
-
-                    # Add legend with genera
+                    # Legend
                     legend_x = w - 380
                     legend_y_start = 80
 
@@ -597,13 +458,9 @@ if species_data:
                             style={"font-size": "10px", "fill": "#808080", "font-weight": "bold", "text-anchor": "start"}
                         )
 
-                    # Add title indicating this is a species-level tree
-                    title_text = "Species-Level Phylogeny (collapsed by species)"
-                    if has_stats:
-                        title_text += " with Genome Statistics"
                     canvas.text(
                         w / 2, 30,
-                        title_text,
+                        "Species-Level Phylogeny (collapsed by species)",
                         style={"font-size": "14px", "font-weight": "bold", "text-anchor": "middle"}
                     )
 

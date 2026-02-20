@@ -7,7 +7,7 @@
 process PANGENOME_PLOTS {
     tag "$cohort_id"
 
-    publishDir "${params.outdir}/pangenomics", mode: 'copy'
+    publishDir "${params.outdir}/pangenomics/plots", mode: 'copy'
 
     // Custom pangenome-plots image with numpy, pandas, matplotlib, scipy, and procps
     container 'pangenome-plots:latest'

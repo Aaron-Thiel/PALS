@@ -65,8 +65,10 @@ workflow PHYLOGENETICS {
     // Step 5: Generate tree visualizations (PNG, SVG, PDF, HTML)
     // =========================================================================
 
-    // Combine tree with genus map for visualization
-    IQTREE3.out.consensus_tree
+    // Combine ML tree with genus map for visualization
+    // Note: use ML tree (.treefile) instead of consensus tree (.contree)
+    // because contree can have inflated branch lengths from bootstrap averaging
+    IQTREE3.out.tree
         .combine(internal_genus_map)
         .set { ch_viz_input }
 
