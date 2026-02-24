@@ -5,7 +5,7 @@
  * and optional genus/species subtree pruning + visualization.
  */
 
-include { PHYLOGENETICS } from '../modules/phylogenetics.nf'
+include { PHYLOGENETICS } from '../modules/phylogenetics/phylogenetics.nf'
 include { BUILD_SUBTREE_GROUPS } from '../modules/phylogenetics/build_subtree_groups.nf'
 include { SUBTREE_VISUALIZATION } from '../modules/phylogenetics/subtree_visualization.nf'
 

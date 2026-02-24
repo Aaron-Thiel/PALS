@@ -6,10 +6,10 @@
  * BiG-SCAPE similarity network analysis, and network visualization.
  */
 
-include { ANTISMASH } from '../modules/pangenomics/antismash.nf'
-include { COLLECT_SUBSET_BGCS } from '../modules/pangenomics/collect_subset_bgcs.nf'
-include { BIGSCAPE } from '../modules/pangenomics/bigscape.nf'
-include { BIGSCAPE_NETWORK_PLOT } from '../modules/pangenomics/bigscape_network_plot.nf'
+include { ANTISMASH } from '../modules/bgc/antismash.nf'
+include { COLLECT_SUBSET_BGCS } from '../modules/bgc/collect_subset_bgcs.nf'
+include { BIGSCAPE } from '../modules/bgc/bigscape.nf'
+include { BIGSCAPE_NETWORK_PLOT } from '../modules/bgc/bigscape_network_plot.nf'
 
 workflow BGC_BLOCK {
 

@@ -13,11 +13,11 @@
  *      results joined with genome_metadata.csv.
  */
 
-include { GENOME_VISUALIZATION as GENE_COMPARISON } from '../modules/genomeviz.nf'
-include { GENOME_VISUALIZATION as GENOME_ALIGNMENT_VIZ } from '../modules/genomeviz.nf'
-include { SELECT_COMPLETE_REFERENCE } from '../modules/select_complete_reference.nf'
-include { NEW_GENES_OVERVIEW } from '../modules/new_genes_overview.nf'
-include { LOST_GENES } from '../modules/lost_genes.nf'
+include { GENOME_VISUALIZATION as GENE_COMPARISON } from '../modules/new_genes/genomeviz.nf'
+include { GENOME_VISUALIZATION as GENOME_ALIGNMENT_VIZ } from '../modules/new_genes/genomeviz.nf'
+include { SELECT_COMPLETE_REFERENCE } from '../modules/new_genes/select_complete_reference.nf'
+include { NEW_GENES_OVERVIEW } from '../modules/new_genes/new_genes_overview.nf'
+include { LOST_GENES } from '../modules/new_genes/lost_genes.nf'
 
 workflow NEW_GENES_BLOCK {
 

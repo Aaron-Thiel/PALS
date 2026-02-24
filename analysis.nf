@@ -37,7 +37,7 @@ nextflow.enable.dsl=2
 // =========================================================================
 
 include { BAKTA } from './modules/bakta'
-include { PANTA_COHORT } from './modules/pangenomics/panta_cohort.nf'
+include { PANTA_COHORT } from './modules/panta_cohort.nf'
 
 // =========================================================================
 // Import downstream blocks

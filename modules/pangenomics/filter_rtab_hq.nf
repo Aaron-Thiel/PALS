@@ -35,6 +35,7 @@ process FILTER_RTAB_HQ {
     min_comp = float(${min_completeness})
 
     # ── Read pipeline_summary to get pasa_completeness per internal sample ──
+    # Only samples with pasa_completeness >= threshold are kept
     exclude = set()
     internal_total = 0
 
@@ -42,11 +43,14 @@ process FILTER_RTAB_HQ {
         reader = csv.DictReader(f, delimiter="\\t")
         for row in reader:
             sid = row["sample_id"]
-            pasa_comp = row.get("pasa_completeness", "NA")
-            if pasa_comp in ("NA", ""):
-                # No scaffold → sample won't be in Rtab anyway
-                continue
             internal_total += 1
+            pasa_comp = row.get("pasa_completeness", "NA")
+
+            if pasa_comp in ("NA", ""):
+                exclude.add(sid)
+                print(f"  EXCLUDE {sid}: no pasa_completeness")
+                continue
+
             if float(pasa_comp) < min_comp:
                 exclude.add(sid)
                 print(f"  EXCLUDE {sid}: pasa_completeness={pasa_comp}%")

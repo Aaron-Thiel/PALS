@@ -6,11 +6,11 @@
  * For batch analysis of bacterial genomes (~50-500 genomes)
  */
 
-include { EXTRACT_CORE_GENES } from './phylogenetics/extract_core_genes.nf'
-include { ALIGN_CORE_GENES } from './phylogenetics/align_core_genes.nf'
-include { CONCATENATE_ALIGNMENT } from './phylogenetics/concatenate_alignment.nf'
-include { IQTREE3 } from './phylogenetics/iqtree3.nf'
-include { TREE_VISUALIZATION } from './phylogenetics/tree_visualization.nf'
+include { EXTRACT_CORE_GENES } from './extract_core_genes.nf'
+include { ALIGN_CORE_GENES } from './align_core_genes.nf'
+include { CONCATENATE_ALIGNMENT } from './concatenate_alignment.nf'
+include { IQTREE3 } from './iqtree3.nf'
+include { TREE_VISUALIZATION } from './tree_visualization.nf'
 
 workflow PHYLOGENETICS {
     take:
