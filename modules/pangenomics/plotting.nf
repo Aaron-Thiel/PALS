@@ -10,7 +10,7 @@ process PANGENOME_PLOTS {
     publishDir "${params.outdir}/pangenomics/plots", mode: 'copy'
 
     // Custom pangenome-plots image with numpy, pandas, matplotlib, scipy, and procps
-    container 'pangenome-plots:latest'
+    container 'aaronthiel/pangenome-plots:latest'
 
     input:
     tuple val(cohort_id), path(rtab_file), path(eggnog_annotations)

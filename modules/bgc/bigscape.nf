@@ -12,7 +12,7 @@ process BIGSCAPE {
 
     publishDir "${params.outdir}/pangenomics/bigscape/${group_id}", mode: 'copy'
 
-    container 'bigscape:latest'
+    container 'ghcr.io/medema-group/big-scape:2.0.0-beta.6'
 
     input:
     tuple val(group_id), path(bgc_dir)
