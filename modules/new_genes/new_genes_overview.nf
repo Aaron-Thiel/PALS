@@ -107,7 +107,7 @@ process NEW_GENES_OVERVIEW {
         if not os.path.isdir(entry):
             continue
 
-        report_path = os.path.join(entry, 'assembly_comparison', 'new_genes', 'gene_comparison_report.csv')
+        report_path = os.path.join(entry, 'new_genes', 'gene_comparison_report.csv')
         if not os.path.exists(report_path):
             continue
 

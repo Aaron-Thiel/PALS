@@ -38,6 +38,8 @@ process GENOME_VISUALIZATION {
 
     script:
     """
+    export MPLCONFIGDIR=\$(mktemp -d)
+
     echo "=============================================="
     echo "GenomeViz: ${sample_id} (mode: ${mode})"
     echo "=============================================="

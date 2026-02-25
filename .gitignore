@@ -3,7 +3,8 @@
 /.vscode/
 /databases/
 /del/
-/input/
+/input/*/
+/input/samplesheet.csv
 /results/
 /scripts/
 /test/
