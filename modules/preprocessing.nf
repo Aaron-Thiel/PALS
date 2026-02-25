@@ -71,7 +71,7 @@ workflow PREPROCESSING {
         // Skip filtering - use fastp trimmed reads directly
         log.info "Skipping KrakenTools filtering (filter_reads=false)"
         ch_processed_reads = FASTP.out.trimmed_reads
-        ch_krakentools_summary = Channel.empty()
+        ch_krakentools_summary = channel.empty()
     }
 
     //=========================================================================

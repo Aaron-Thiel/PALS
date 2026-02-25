@@ -2,7 +2,7 @@
 
 /*
 ========================================================================================
-    BGC-link Assembly Pipeline
+    PALS - Assembly Pipeline
 ========================================================================================
     Genome assembly, annotation, and scaffolding pipeline.
 
@@ -35,7 +35,7 @@
     8. QC + PASA Filter: Intelligent scaffold selection (optional)
     9. SUMMARY:   Generate sample summary TSV with key metrics
 
-    Author: Created for BGC-link project
+    Author: Aaron Thiel
     Date: November 2025
 ========================================================================================
 */
@@ -88,7 +88,7 @@ workflow {
     // Print pipeline parameters
     log.info """\
         ===================================
-        BGC-link Assembly Pipeline
+        PALS - Assembly Pipeline
         ===================================
         Input samplesheet : ${params.input}
         Output directory  : ${params.outdir}

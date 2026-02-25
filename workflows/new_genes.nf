@@ -55,7 +55,7 @@ workflow NEW_GENES_BLOCK {
     // Extract scaffold + contig files per sample (for stageAs requirements)
     ch_sample_files = ch_genomeviz_input
         .map { sample_id, scaffold_fna, scaffold_gff, scaffold_faa,
-               ref_fna, ref_gff, contig_fna, contig_gff, contig_faa ->
+               _ref_fna, _ref_gff, contig_fna, contig_gff, contig_faa ->
             tuple(sample_id, scaffold_fna, scaffold_gff, scaffold_faa,
                   contig_fna, contig_gff, contig_faa)
         }
@@ -80,7 +80,7 @@ workflow NEW_GENES_BLOCK {
     // =================================================================
     if (params.subset_analysis_enable) {
         GENE_COMPARISON.out.results
-            .map { sample_id, results_dir -> results_dir }
+            .map { _sample_id, results_dir -> results_dir }
             .collect()
             .set { ch_all_comparison }
 
@@ -94,24 +94,24 @@ workflow NEW_GENES_BLOCK {
 
         // --- Lost genes analysis (contig genes absent from scaffolds) ---
         ch_genomeviz_input
-            .map { sample_id, scaffold_fna, scaffold_gff, scaffold_faa,
-                   ref_fna, ref_gff, contig_fna, contig_gff, contig_faa ->
+            .map { _sample_id, _scaffold_fna, _scaffold_gff, _scaffold_faa,
+                   _ref_fna, _ref_gff, _contig_fna, _contig_gff, contig_faa ->
                 contig_faa
             }
             .collect()
             .set { ch_contig_faa }
 
         ch_genomeviz_input
-            .map { sample_id, scaffold_fna, scaffold_gff, scaffold_faa,
-                   ref_fna, ref_gff, contig_fna, contig_gff, contig_faa ->
+            .map { _sample_id, _scaffold_fna, _scaffold_gff, _scaffold_faa,
+                   _ref_fna, _ref_gff, _contig_fna, contig_gff, _contig_faa ->
                 contig_gff
             }
             .collect()
             .set { ch_contig_gff }
 
         ch_genomeviz_input
-            .map { sample_id, scaffold_fna, scaffold_gff, scaffold_faa,
-                   ref_fna, ref_gff, contig_fna, contig_gff, contig_faa ->
+            .map { _sample_id, _scaffold_fna, _scaffold_gff, scaffold_faa,
+                   _ref_fna, _ref_gff, _contig_fna, _contig_gff, _contig_faa ->
                 scaffold_faa
             }
             .collect()

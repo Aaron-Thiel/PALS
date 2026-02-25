@@ -89,7 +89,7 @@ workflow CODON_BLOCK {
                         try {
                             completeness = fields[4] as Double
                             contamination = fields[5] as Double
-                        } catch (NumberFormatException e) {
+                        } catch (NumberFormatException _e) {
                             return
                         }
 
@@ -135,26 +135,26 @@ workflow CODON_BLOCK {
     // Determine which references need building
     ch_species_needed = ch_codon_samples
         .map { meta, _ffn -> meta.species }
-        .filter { it && it != 'Unknown' && it != 'NA' }
+        .filter { species -> species && species != 'Unknown' && species != 'NA' }
         .unique()
 
     ch_genera_needed = ch_codon_samples
         .map { meta, _ffn -> meta.genus }
-        .filter { it && it != 'Unknown' && it != 'NA' }
+        .filter { genus -> genus && genus != 'Unknown' && genus != 'NA' }
         .unique()
 
     ch_species_to_build = ch_species_needed
         .filter { species -> !species_refs.containsKey(species) && species_genomes.containsKey(species) }
         .map { species ->
             def genomes = species_genomes[species]
-            [species, genomes.collect { it[0] }, genomes.collect { it[1] }]
+            [species, genomes.collect { pair -> pair[0] }, genomes.collect { pair -> pair[1] }]
         }
 
     ch_genera_to_build = ch_genera_needed
         .filter { genus -> !genus_refs.containsKey(genus) && genus_genomes.containsKey(genus) }
         .map { genus ->
             def genomes = genus_genomes[genus]
-            [genus, genomes.collect { it[0] }, genomes.collect { it[1] }]
+            [genus, genomes.collect { pair -> pair[0] }, genomes.collect { pair -> pair[1] }]
         }
 
     // Extract CDS and build missing references
@@ -217,7 +217,7 @@ workflow CODON_BLOCK {
 
     // Log failures
     CODON_QC.out.report
-        .filter { meta, report -> report.text.contains('"qc_status": "FAIL"') }
+        .filter { _meta, report -> report.text.contains('"qc_status": "FAIL"') }
         .subscribe { meta, _report -> log.warn "Codon QC FAILED: ${meta.id}" }
 
     // =========================================================================
@@ -253,11 +253,11 @@ workflow CODON_BLOCK {
         }
     }
 
-    log.info "  [codon] External FFN files: ${ext_ffn_by_genus.values().sum { it.size() } ?: 0} genomes across ${ext_ffn_by_genus.size()} genera"
+    log.info "  [codon] External FFN files: ${ext_ffn_by_genus.values().sum { v -> v.size() } ?: 0} genomes across ${ext_ffn_by_genus.size()} genera"
 
-    ch_ext_by_genus = Channel.fromList(
+    ch_ext_by_genus = channel.fromList(
         ext_ffn_by_genus.collect { genus, ffns -> tuple(genus, ffns) }
-    ).filter { genus, ffns -> ffns.size() > 0 }
+    ).filter { _genus, ffns -> ffns.size() > 0 }
 
     ch_ext_input = ch_ext_by_genus
         .combine(ch_new_genus_refs)
@@ -266,7 +266,7 @@ workflow CODON_BLOCK {
             def ref = all_genus_refs_combined[genus]
             ref ? tuple(genus, ffns, file(ref.toString())) : null
         }
-        .filter { it != null }
+        .filter { result -> result != null }
 
     EXTERNAL_CODON_METRICS(ch_ext_input)
 
@@ -278,17 +278,17 @@ workflow CODON_BLOCK {
 
         // Collect internal gene_codon_analysis.tsv files
         ch_internal_codon_files = CODON_QC.out.gene_analysis
-            .map { meta, f -> f }
+            .map { _meta, f -> f }
             .collect()
 
         // Collect reference codon metrics TSVs
         ch_reference_codon_files = EXTERNAL_CODON_METRICS.out.metrics
-            .map { genus, f -> f }
+            .map { _genus, f -> f }
             .collect()
             .ifEmpty([file('NO_REFERENCE_DATA')])
 
         // Family-level correlation (all internal samples, no taxonomy filter)
-        ch_family_scope = Channel.of(
+        ch_family_scope = channel.of(
             tuple("family", "internal", "correlation")
         )
 
@@ -358,7 +358,7 @@ workflow CODON_BLOCK {
 
             if (subset_groups) {
                 // One correlation per group (internal samples only)
-                ch_subset_scopes = Channel.fromList(
+                ch_subset_scopes = channel.fromList(
                     subset_groups.collect { group ->
                         def group_id = group[0]
                         tuple(group_id, "internal", "subsets/${group_id}")

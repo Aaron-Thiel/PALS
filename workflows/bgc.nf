@@ -30,7 +30,7 @@ workflow BGC_BLOCK {
     // --- BiG-SCAPE taxonomy grouping + networks (requires subset_analysis_enable) ---
     if (params.subset_analysis_enable) {
         ANTISMASH.out.results_dir
-            .map { sample_id, dir -> dir }
+            .map { _sample_id, dir -> dir }
             .collect()
             .set { ch_all_antismash_dirs }
 

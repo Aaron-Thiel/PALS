@@ -11,7 +11,7 @@ process EXTERNAL_CODON_METRICS {
     tag "$genus"
     label 'process_low'
 
-    storeDir { "${params.outdir}/codon/external_metrics/${genus}" }
+    storeDir "${params.outdir}/codon/external_metrics/${genus}"
 
     conda 'conda-forge::pandas conda-forge::numpy'
     container null

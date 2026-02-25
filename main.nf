@@ -3,9 +3,9 @@ nextflow.enable.dsl=2
 
 /*
 ========================================================================================
-    BGC-link Pipeline Orchestrator
+    PALS - Pipeline Orchestrator
 ========================================================================================
-    Main entry point for running BGC-link pipelines.
+    Main entry point for running PALS pipelines.
 
     Available pipelines:
       - assembly:  Genome assembly, annotation, and scaffolding (assembly.nf)
@@ -20,7 +20,7 @@ nextflow.enable.dsl=2
       nextflow run assembly.nf -c assembly.config --input samplesheet.csv
       nextflow run analysis.nf -c analysis.config
 
-    Author: Created for BGC-link project
+    Author: Aaron Thiel
 ========================================================================================
 */
 
@@ -38,7 +38,7 @@ params.help = false
 def helpMessage() {
     log.info """
     ===================================
-    BGC-link Pipeline Orchestrator
+    PALS - Pipeline Orchestrator
     ===================================
 
     Usage:
@@ -91,7 +91,7 @@ workflow {
 
     log.info """
     ===================================
-    BGC-link Pipeline Orchestrator
+    PALS - Pipeline Orchestrator
     ===================================
     Pipeline: ${params.pipeline}
     ===================================

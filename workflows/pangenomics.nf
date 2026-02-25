@@ -31,7 +31,7 @@ workflow PANGENOMICS_BLOCK {
     def cached_eggnog = file("${params.outdir}/pangenomics/eggnog/pangenomics_cohort.emapper.annotations")
     if (cached_eggnog.exists()) {
         log.info "  [pangenomics] Loading cached EggNOG annotations from ${params.outdir}/pangenomics/eggnog/"
-        ch_eggnog_annotations = Channel.of(tuple("pangenomics_cohort", cached_eggnog))
+        ch_eggnog_annotations = channel.of(tuple("pangenomics_cohort", cached_eggnog))
     } else {
         EGGNOG(ch_panta_dir)
         ch_eggnog_annotations = EGGNOG.out.annotations

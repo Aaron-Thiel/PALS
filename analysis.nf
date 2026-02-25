@@ -3,7 +3,7 @@ nextflow.enable.dsl=2
 
 /*
 ========================================================================================
-    BGC-link Analysis Pipeline
+    PALS - Analysis Pipeline
 ========================================================================================
     Modular analysis pipeline for pangenomics, phylogenetics, and BGC analysis.
 
@@ -28,7 +28,7 @@ nextflow.enable.dsl=2
     Run with: nextflow run analysis.nf -c analysis.config --internal results/assembly
     SPAdes:   nextflow run analysis.nf -c analysis.config --internal results/assembly --spades
 
-    Author: Created for BGC-link project
+    Author: Aaron Thiel
 ========================================================================================
 */
 
@@ -57,7 +57,7 @@ workflow {
 
     log.info """
     ===================================
-    BGC-link Analysis Pipeline
+    PALS - Analysis Pipeline
     ===================================
     Input:  ${params.internal}${params.external ? ' + ' + params.external : ''}
     Mode:   ${params.spades ? 'SPAdes (pre-existing Bakta)' : 'Normal (PASA scaffolds → Bakta)'}
@@ -147,9 +147,9 @@ workflow {
         def panta_path = file("${params.outdir}/pangenomics/panta/panta_results")
         def sample_count = cached_rtab.readLines()[0].split('\t').length - 1
 
-        ch_panta_dir    = Channel.of(tuple("pangenomics_cohort", panta_path))
-        ch_rtab         = Channel.of(tuple("pangenomics_cohort", cached_rtab))
-        ch_sample_count = Channel.of(tuple("pangenomics_cohort", sample_count))
+        ch_panta_dir    = channel.of(tuple("pangenomics_cohort", panta_path))
+        ch_rtab         = channel.of(tuple("pangenomics_cohort", cached_rtab))
+        ch_sample_count = channel.of(tuple("pangenomics_cohort", sample_count))
     } else {
         ch_all_gff
             .map { _sample_id, gff -> gff }
@@ -242,7 +242,7 @@ workflow {
                 def genome_dir = "${params.reference_genomes_dir}/${genus}"
                 (ani_tsv.exists() && metadata_csv.exists()) ? tuple(sample_id, ani_tsv, metadata_csv, genome_dir) : null
             }
-            .filter { it != null }
+            .filter { item -> item != null }
             .set { ch_skani_metadata }
 
         // Derive PANTA gene_presence_absence.csv from panta_dir
@@ -252,10 +252,10 @@ workflow {
         // EggNOG annotations (auto-detect from cache, fallback to NO_EGGNOG)
         def cached_eggnog = file("${params.outdir}/pangenomics/eggnog/pangenomics_cohort.emapper.annotations")
         if (cached_eggnog.exists()) {
-            ch_eggnog_for_newgenes = Channel.of(cached_eggnog)
+            ch_eggnog_for_newgenes = channel.of(cached_eggnog)
         } else {
             log.warn "  [new_genes] EggNOG annotations not found at ${cached_eggnog}. COG analysis will be skipped."
-            ch_eggnog_for_newgenes = Channel.of(file("NO_EGGNOG"))
+            ch_eggnog_for_newgenes = channel.of(file("NO_EGGNOG"))
         }
 
         // Rtab file for pangenome-wide COG baseline

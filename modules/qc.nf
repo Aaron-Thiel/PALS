@@ -103,7 +103,7 @@ intro_text: "This report aggregates quality control metrics from multiple tools 
 
 report_header_info:
   - Contact E-mail: 'user@example.com'
-  - Pipeline: 'BGC-link Comprehensive QC'
+  - Pipeline: 'PALS Comprehensive QC'
   - Stage: '${stage_name}'
 
 module_order:

@@ -73,7 +73,7 @@ process BUILD_SPECIES_REFERENCE {
     label 'process_low'
 
     // Store reference alongside source genomes
-    storeDir { "${params.reference_genomes_dir}/${species.split('_')[0]}/${species}" }
+    storeDir "${params.reference_genomes_dir}/${species.split('_')[0]}/${species}"
 
     container 'quay.io/biocontainers/pandas:2.2.1'
     conda 'conda-forge::pandas conda-forge::numpy'
@@ -234,7 +234,7 @@ process BUILD_GENUS_REFERENCE {
     label 'process_low'
 
     // Store reference at genus level
-    storeDir { "${params.reference_genomes_dir}/${genus}" }
+    storeDir "${params.reference_genomes_dir}/${genus}"
 
     container 'quay.io/biocontainers/pandas:2.2.1'
     conda 'conda-forge::pandas conda-forge::numpy'
