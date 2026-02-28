@@ -1,7 +1,7 @@
 /*
  * PASA scaffold selection filter
  * Selects the best PASA scaffold (standard vs sensitive) based on QC results
- * Uses BUSCO completeness as quality measure from the comprehensive QC JSON
+ * Uses CheckM2 completeness (with heavy penalty <90%) + L90 contiguity from QUAST
  */
 
 process PASA_FILTER {
@@ -10,7 +10,7 @@ process PASA_FILTER {
     publishDir "${params.outdir}/${sample_id}/pasa_filter", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(pasa_standard), path(pasa_sensitive), path(qc_standard_json), path(qc_sensitive_json)
+    tuple val(sample_id), path(pasa_standard), path(pasa_sensitive), path(checkm2_standard_json), path(quast_standard_tsv), path(checkm2_sensitive_json), path(quast_sensitive_tsv)
 
     output:
     tuple val(sample_id), path("selected_scaffold.fasta"), emit: selected_scaffold
@@ -23,11 +23,10 @@ process PASA_FILTER {
 import json
 import shutil
 import os
+import csv
 
-# Parse QC JSON files to extract BUSCO completeness scores
-def get_busco_score(json_file):
-    # Extract BUSCO complete_percent from QC comprehensive summary JSON
-    # Handle placeholder files (NO_QC_FILE*) gracefully
+def get_checkm2_completeness(json_file):
+    """Extract completeness from CheckM2 summary JSON."""
     if not json_file or str(json_file).startswith('NO_QC_FILE') or not os.path.exists(json_file):
         return None
     try:
@@ -35,19 +34,31 @@ def get_busco_score(json_file):
             return None
         with open(json_file, 'r') as f:
             data = json.load(f)
-        # The JSON contains a list of tool results
-        for entry in data:
-            if entry.get('tool') == 'busco':
-                return entry.get('complete_percent', 0.0)
-        return 0.0
+        return data.get('completeness', 0.0)
     except Exception as e:
-        print(f"Warning: Could not parse {json_file}: {e}")
+        print(f"Warning: Could not parse CheckM2 JSON {json_file}: {e}")
         return None
 
-# Check if a scaffold file is valid (exists and has content)
+def get_l90_from_quast(tsv_file):
+    """Extract L90 from QUAST transposed report TSV."""
+    if not tsv_file or str(tsv_file).startswith('NO_QC_FILE') or not os.path.exists(tsv_file):
+        return None
+    try:
+        if os.path.getsize(tsv_file) == 0:
+            return None
+        with open(tsv_file, 'r') as f:
+            reader = csv.DictReader(f, delimiter='\\t')
+            for row in reader:
+                val = row.get('L90')
+                if val is not None:
+                    return int(val)
+        return None
+    except Exception as e:
+        print(f"Warning: Could not parse QUAST TSV {tsv_file}: {e}")
+        return None
+
 def is_valid_scaffold(scaffold_path):
     try:
-        # Handle placeholder files (NO_FILE) gracefully
         if not scaffold_path or scaffold_path == 'NO_FILE':
             return False
         if not os.path.exists(scaffold_path):
@@ -67,71 +78,125 @@ print(f"Sensitive PASA available: {sensitive_available}")
 
 # Handle cases where only one scaffold is available
 if standard_available and not sensitive_available:
-    # Only standard available - use it by default
     selected_scaffold = "${pasa_standard}"
     scaffold_type = "standard"
-    standard_score = get_busco_score("${qc_standard_json}") or 0.0
-    selection_reason = f"Standard PASA selected (only available option, BUSCO: {standard_score}%)"
-    sensitive_score = None
-    print(f"Only standard PASA available, selecting it by default")
+    std_completeness = get_checkm2_completeness("${checkm2_standard_json}")
+    std_l90 = get_l90_from_quast("${quast_standard_tsv}")
+    sens_completeness = None
+    sens_l90 = None
+    selection_reason = f"Standard PASA selected (only available option, completeness: {std_completeness}%, L90: {std_l90})"
 elif sensitive_available and not standard_available:
-    # Only sensitive available - use it by default
     selected_scaffold = "${pasa_sensitive}"
     scaffold_type = "sensitive"
-    sensitive_score = get_busco_score("${qc_sensitive_json}") or 0.0
-    selection_reason = f"Sensitive PASA selected (only available option, BUSCO: {sensitive_score}%)"
-    standard_score = None
-    print(f"Only sensitive PASA available, selecting it by default")
+    sens_completeness = get_checkm2_completeness("${checkm2_sensitive_json}")
+    sens_l90 = get_l90_from_quast("${quast_sensitive_tsv}")
+    std_completeness = None
+    std_l90 = None
+    selection_reason = f"Sensitive PASA selected (only available option, completeness: {sens_completeness}%, L90: {sens_l90})"
 elif not standard_available and not sensitive_available:
-    # Neither available - error
     raise RuntimeError("Neither standard nor sensitive PASA scaffold is available")
 else:
-    # Both available - compare BUSCO scores
-    standard_score = get_busco_score("${qc_standard_json}") or 0.0
-    sensitive_score = get_busco_score("${qc_sensitive_json}") or 0.0
+    # Both available - compare using CheckM2 completeness + L90
+    std_completeness = get_checkm2_completeness("${checkm2_standard_json}") or 0.0
+    sens_completeness = get_checkm2_completeness("${checkm2_sensitive_json}") or 0.0
+    std_l90 = get_l90_from_quast("${quast_standard_tsv}")
+    sens_l90 = get_l90_from_quast("${quast_sensitive_tsv}")
 
-    print(f"Standard PASA BUSCO score: {standard_score}")
-    print(f"Sensitive PASA BUSCO score: {sensitive_score}")
+    print(f"Standard  - CheckM2 completeness: {std_completeness}%, L90: {std_l90}")
+    print(f"Sensitive - CheckM2 completeness: {sens_completeness}%, L90: {sens_l90}")
 
-    # Select the best scaffold based on BUSCO completeness
-    if standard_score > sensitive_score:
+    # Tier 1: Heavily penalize completeness < 90%
+    std_above_threshold = std_completeness >= 90.0
+    sens_above_threshold = sens_completeness >= 90.0
+
+    if std_above_threshold and not sens_above_threshold:
         selected_scaffold = "${pasa_standard}"
         scaffold_type = "standard"
-        selection_reason = f"Standard PASA selected (BUSCO: {standard_score}% vs {sensitive_score}%)"
-    elif sensitive_score > standard_score:
+        selection_reason = (
+            f"Standard PASA selected (completeness {std_completeness}% >= 90% vs "
+            f"sensitive {sens_completeness}% < 90%)"
+        )
+    elif sens_above_threshold and not std_above_threshold:
         selected_scaffold = "${pasa_sensitive}"
         scaffold_type = "sensitive"
-        selection_reason = f"Sensitive PASA selected (BUSCO: {sensitive_score}% vs {standard_score}%)"
+        selection_reason = (
+            f"Sensitive PASA selected (completeness {sens_completeness}% >= 90% vs "
+            f"standard {std_completeness}% < 90%)"
+        )
     else:
-        # Tie - default to sensitive
-        selected_scaffold = "${pasa_sensitive}"
-        scaffold_type = "sensitive"
-        selection_reason = f"Sensitive PASA selected (default - equal BUSCO: {standard_score}%)"
+        # Tier 2: Both above or both below 90% - compare L90 (lower is better)
+        if std_l90 is not None and sens_l90 is not None:
+            if std_l90 < sens_l90:
+                selected_scaffold = "${pasa_standard}"
+                scaffold_type = "standard"
+                selection_reason = (
+                    f"Standard PASA selected (better contiguity: L90={std_l90} vs {sens_l90}, "
+                    f"completeness: {std_completeness}% vs {sens_completeness}%)"
+                )
+            elif sens_l90 < std_l90:
+                selected_scaffold = "${pasa_sensitive}"
+                scaffold_type = "sensitive"
+                selection_reason = (
+                    f"Sensitive PASA selected (better contiguity: L90={sens_l90} vs {std_l90}, "
+                    f"completeness: {sens_completeness}% vs {std_completeness}%)"
+                )
+            else:
+                # L90 tied - pick higher completeness
+                if std_completeness >= sens_completeness:
+                    selected_scaffold = "${pasa_standard}"
+                    scaffold_type = "standard"
+                    selection_reason = (
+                        f"Standard PASA selected (tied L90={std_l90}, "
+                        f"higher completeness: {std_completeness}% vs {sens_completeness}%)"
+                    )
+                else:
+                    selected_scaffold = "${pasa_sensitive}"
+                    scaffold_type = "sensitive"
+                    selection_reason = (
+                        f"Sensitive PASA selected (tied L90={sens_l90}, "
+                        f"higher completeness: {sens_completeness}% vs {std_completeness}%)"
+                    )
+        else:
+            # L90 unavailable for one/both - fall back to completeness
+            if std_completeness >= sens_completeness:
+                selected_scaffold = "${pasa_standard}"
+                scaffold_type = "standard"
+                selection_reason = (
+                    f"Standard PASA selected (L90 unavailable, "
+                    f"completeness: {std_completeness}% vs {sens_completeness}%)"
+                )
+            else:
+                selected_scaffold = "${pasa_sensitive}"
+                scaffold_type = "sensitive"
+                selection_reason = (
+                    f"Sensitive PASA selected (L90 unavailable, "
+                    f"completeness: {sens_completeness}% vs {std_completeness}%)"
+                )
 
 # Copy selected scaffold
 shutil.copy(selected_scaffold, "selected_scaffold.fasta")
 
 # Create summary report
 sample_id = "${sample_id}"
-pasa_std = "${pasa_standard}"
-pasa_sens = "${pasa_sensitive}"
 
 summary_lines = [
     f"PASA Scaffold Selection Results for {sample_id}",
     "==============================================",
     "",
-    f"Standard PASA: {pasa_std}",
+    f"Standard PASA: ${pasa_standard}",
     f"  Available: {standard_available}",
-    f"  BUSCO Completeness: {standard_score}%" if standard_score is not None else "  BUSCO Completeness: N/A",
+    f"  CheckM2 Completeness: {std_completeness}%" if std_completeness is not None else "  CheckM2 Completeness: N/A",
+    f"  L90: {std_l90}" if std_l90 is not None else "  L90: N/A",
     "",
-    f"Sensitive PASA: {pasa_sens}",
+    f"Sensitive PASA: ${pasa_sensitive}",
     f"  Available: {sensitive_available}",
-    f"  BUSCO Completeness: {sensitive_score}%" if sensitive_score is not None else "  BUSCO Completeness: N/A",
+    f"  CheckM2 Completeness: {sens_completeness}%" if sens_completeness is not None else "  CheckM2 Completeness: N/A",
+    f"  L90: {sens_l90}" if sens_l90 is not None else "  L90: N/A",
     "",
     f"Selection Decision: {selection_reason}",
     f"Selected Scaffold: {scaffold_type}",
     "",
-    "Quality Score: BUSCO completeness percentage (higher is better)"
+    "Scoring: Completeness >= 90% required (hard gate), then lowest L90 wins"
 ]
 
 with open("pasa_selection_summary.txt", 'w') as f:
@@ -144,8 +209,10 @@ selection_data = {
     "selected_scaffold": scaffold_type,
     "standard_available": standard_available,
     "sensitive_available": sensitive_available,
-    "standard_busco": standard_score,
-    "sensitive_busco": sensitive_score,
+    "standard_completeness": std_completeness,
+    "sensitive_completeness": sens_completeness,
+    "standard_l90": std_l90,
+    "sensitive_l90": sens_l90,
     "selection_reason": selection_reason
 }
 
@@ -153,7 +220,7 @@ with open("pasa_selection_summary.json", 'w') as f:
     json.dump(selection_data, f, indent=2)
 
 print(f"PASA scaffold selection completed for {sample_id}")
-print(f"Selected: {scaffold_type} (BUSCO: {standard_score if scaffold_type == 'standard' else sensitive_score}%)")
+print(f"Selected: {scaffold_type} ({selection_reason})")
 PYEOF
     """
 }

@@ -193,4 +193,5 @@ workflow QC {
     multiqc_data = MULTIQC_AGGREGATE.out.multiqc_data
     json_reports = MULTIQC_AGGREGATE.out.json_reports
     checkm2_json = CHECKM2.out.json_reports  // Direct CheckM2 JSON for HQ filtering
+    quast_tsv = QUAST.out.tsv_reports         // QUAST transposed report (L90, N50 etc.)
 }

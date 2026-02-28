@@ -340,14 +340,19 @@ workflow {
     //=========================================================================
     if (params.pasa_filter) {
         // Use left outer join to handle cases where only one PASA scaffold exists
+        // Pass CheckM2 JSON (completeness) + QUAST TSV (L90) for each scaffold
         ch_pasa_scaffolds
-            .join(QC_PASA_STANDARD.out.json_reports, remainder: true)
-            .join(QC_PASA_SENSITIVE.out.json_reports, remainder: true)
-            .map { sample_id, std, sens, qc_std, qc_sens ->
+            .join(QC_PASA_STANDARD.out.checkm2_json, remainder: true)
+            .join(QC_PASA_STANDARD.out.quast_tsv, remainder: true)
+            .join(QC_PASA_SENSITIVE.out.checkm2_json, remainder: true)
+            .join(QC_PASA_SENSITIVE.out.quast_tsv, remainder: true)
+            .map { sample_id, std, sens, checkm2_std, quast_std, checkm2_sens, quast_sens ->
                 // Use unique placeholder names per sample to avoid Nextflow file staging collisions
-                def qc_std_file = qc_std ?: file("NO_QC_FILE_${sample_id}_std")
-                def qc_sens_file = qc_sens ?: file("NO_QC_FILE_${sample_id}_sens")
-                tuple(sample_id, std, sens, qc_std_file, qc_sens_file)
+                def checkm2_std_file = checkm2_std ?: file("NO_QC_FILE_${sample_id}_checkm2_std")
+                def quast_std_file = quast_std ?: file("NO_QC_FILE_${sample_id}_quast_std")
+                def checkm2_sens_file = checkm2_sens ?: file("NO_QC_FILE_${sample_id}_checkm2_sens")
+                def quast_sens_file = quast_sens ?: file("NO_QC_FILE_${sample_id}_quast_sens")
+                tuple(sample_id, std, sens, checkm2_std_file, quast_std_file, checkm2_sens_file, quast_sens_file)
             }
             .set { ch_pasa_filter_input }
 
