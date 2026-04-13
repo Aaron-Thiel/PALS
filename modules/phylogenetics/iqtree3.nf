@@ -44,8 +44,9 @@ process IQTREE3 {
     def partition_opt = (use_partition && partition && partition.name != 'null') ? "-p ${partition}" : ""
     """
     #!/bin/bash
-    set -euo pipefail
-    
+    set -eu
+    # Note: pipefail removed to avoid SIGPIPE issues with large files in containerized environments
+
     echo "=============================================="
     echo "IQ-TREE 3 Phylogenetic Analysis"
     echo "=============================================="
@@ -56,15 +57,15 @@ process IQTREE3 {
     echo "Partition model: ${use_partition}"
     echo "Threads: ${threads}"
     echo ""
-    
+
     # Validate input alignment
     if [ ! -s "${alignment}" ]; then
         echo "ERROR: Alignment file is empty or missing"
         exit 1
     fi
-    
-    # Count sequences and get alignment length
-    seq_count=\$(grep -c "^>" "${alignment}" || echo "0")
+
+    # Count sequences and get alignment length (use wc for robustness with large files)
+    seq_count=\$(grep -c "^>" "${alignment}" 2>/dev/null || echo "0")
     
     # Get alignment length from first sequence
     aln_length=\$(awk '

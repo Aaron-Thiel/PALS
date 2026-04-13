@@ -10,7 +10,7 @@ process PANGENOME_PLOTS {
     publishDir "${params.outdir}/pangenomics/plots", mode: 'copy'
 
     // Custom pangenome-plots image with numpy, pandas, matplotlib, scipy, and procps
-    container 'pangenome-plots:latest'
+    container 'aaronthiel/pangenome-plots:latest'
 
     input:
     tuple val(cohort_id), path(rtab_file), path(eggnog_annotations)
@@ -34,6 +34,6 @@ process PANGENOME_PLOTS {
     # Run pangenome_plots with EggNOG COG annotations
     pangenome_plots ${rtab_file} -o plots --cog ${eggnog_annotations} --style all -n 100
 
-    echo "Pangenome plotting completed for cohort ${cohort_id}"
+    echo "Pangenome plotting completed for cohort ${cohort_id}!"
     """
 }

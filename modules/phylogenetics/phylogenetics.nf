@@ -6,15 +6,17 @@
  * For batch analysis of bacterial genomes (~50-500 genomes)
  */
 
-include { EXTRACT_CORE_GENES } from './phylogenetics/extract_core_genes.nf'
-include { ALIGN_CORE_GENES } from './phylogenetics/align_core_genes.nf'
-include { CONCATENATE_ALIGNMENT } from './phylogenetics/concatenate_alignment.nf'
-include { IQTREE3 } from './phylogenetics/iqtree3.nf'
+include { EXTRACT_CORE_GENES } from './extract_core_genes.nf'
+include { ALIGN_CORE_GENES } from './align_core_genes.nf'
+include { CONCATENATE_ALIGNMENT } from './concatenate_alignment.nf'
+include { IQTREE3 } from './iqtree3.nf'
+include { TREE_VISUALIZATION } from './tree_visualization.nf'
 
 workflow PHYLOGENETICS {
     take:
-    panta_channel    // tuple(cohort_id, panta_dir) - from PANGENOMICS workflow
-    sample_count_ch  // tuple(cohort_id, sample_count) - number of samples in pangenome
+    panta_channel       // tuple(cohort_id, panta_dir) - from PANGENOMICS workflow
+    sample_count_ch     // tuple(cohort_id, sample_count) - number of samples in pangenome
+    internal_genus_map  // path to TSV file with internal sample_id -> genus mapping
 
     main:
 
@@ -59,6 +61,19 @@ workflow PHYLOGENETICS {
 
     IQTREE3(tree_input)
 
+    // =========================================================================
+    // Step 5: Generate tree visualizations (PNG, SVG, PDF, HTML)
+    // =========================================================================
+
+    // Combine ML tree with genus map for visualization
+    // Note: use ML tree (.treefile) instead of consensus tree (.contree)
+    // because contree can have inflated branch lengths from bootstrap averaging
+    IQTREE3.out.tree
+        .combine(internal_genus_map)
+        .set { ch_viz_input }
+
+    TREE_VISUALIZATION(ch_viz_input)
+
     emit:
     // Core gene extraction outputs
     core_genes = EXTRACT_CORE_GENES.out.core_gene_list
@@ -73,4 +88,10 @@ workflow PHYLOGENETICS {
     consensus_tree = IQTREE3.out.consensus_tree
     iqtree_report = IQTREE3.out.iqtree_report
     iqtree_stats = IQTREE3.out.iqtree_stats
+
+    // Tree visualization outputs
+    tree_png = TREE_VISUALIZATION.out.png
+    tree_svg = TREE_VISUALIZATION.out.svg
+    tree_pdf = TREE_VISUALIZATION.out.pdf
+    taxonomy_map = TREE_VISUALIZATION.out.taxonomy_map
 }

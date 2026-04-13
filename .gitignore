@@ -1,9 +1,16 @@
-.nextflow/
+/__pycache__/
+/.claude/
+/.nextflow/
+/.vscode/
 /databases/
 /del/
-/input/
+/input/*/
+/input/samplesheet.csv
 /results/
+/scripts/
+/test/
 /work/
 
 *.log*
 *.tmp
+sweep*

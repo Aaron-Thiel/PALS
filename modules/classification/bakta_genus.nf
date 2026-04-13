@@ -1,9 +1,13 @@
 /*
  * BAKTA_GENUS - Annotate reference genomes missing GFF3 files
- * 
+ *
  * Only runs Bakta on genomes where gff_path is empty in metadata
  * Updates metadata with annotation source (NCBI or Bakta)
- * Uses storeDir for caching - only GFF3 files are stored in database
+ * Uses storeDir for caching at genus level
+ *
+ * INTERMEDIATE CACHING: GFF3 files are written directly to the database
+ * directory as they complete. On timeout/restart, already-annotated
+ * genomes are skipped, preserving progress across multiple runs.
  */
 
 process BAKTA_GENUS {
@@ -140,25 +144,35 @@ process BAKTA_GENUS {
     bakta_success=0
 
     # Run Bakta on each genome
+    # Track genomes skipped because GFF3 already exists in database (from previous partial run)
+    skipped_existing=0
+
     if [ -d "\$BAKTA_DB" ]; then
         while read -r accession file_path; do
+            # Get species directory from file path
+            species_dir=\$(echo "\$file_path" | sed 's|^[.]/||' | xargs dirname)
+
+            # CHECKPOINT: Skip if GFF3 already exists in database (from previous partial run)
+            if [ -f "\$GENUS_DIR/\$species_dir/\${accession}.gff3" ]; then
+                echo "  ✓ Skipping \$accession - GFF3 already exists in database"
+                skipped_existing=\$((skipped_existing + 1))
+                continue
+            fi
+
             # Find the genome file in the genus directory
             fasta=\$(find "\$GENUS_DIR" -name "\${accession}.fna" -type f 2>/dev/null | head -1)
-            
+
             if [ ! -f "\$fasta" ]; then
                 echo "  WARNING: Could not find \$accession.fna"
                 continue
             fi
-            
-            # Get species directory from file path
-            species_dir=\$(echo "\$file_path" | sed 's|^[.]/||' | xargs dirname)
-            
+
             echo "  Annotating: \$accession (\$species_dir)"
-            
+
             # Create temp output directory for this accession
             outdir="bakta_work/\${accession}"
             mkdir -p "\$outdir"
-            
+
             if bakta \\
                 --db "\$BAKTA_DB" \\
                 --output "\$outdir" \\
@@ -167,21 +181,21 @@ process BAKTA_GENUS {
                 --skip-plot \\
                 --force \\
                 "\$fasta" 2>&1; then
-                
-                # Copy only GFF3 to species directory structure for storeDir
+
+                # Write GFF3 directly to database directory (survives timeout)
                 if [ -f "\$outdir/\${accession}.gff3" ]; then
-                    mkdir -p "\$species_dir"
-                    cp "\$outdir/\${accession}.gff3" "\$species_dir/"
+                    mkdir -p "\$GENUS_DIR/\$species_dir"
+                    cp "\$outdir/\${accession}.gff3" "\$GENUS_DIR/\$species_dir/"
                     bakta_success=\$((bakta_success + 1))
-                    echo "    ✓ Generated: \$species_dir/\${accession}.gff3"
+                    echo "    ✓ Saved to database: \$GENUS_DIR/\$species_dir/\${accession}.gff3"
                 fi
             else
                 echo "    ✗ Failed to annotate \$accession"
             fi
-            
+
             # Clean up bakta output immediately (only keep GFF3)
             rm -rf "\$outdir"
-            
+
         done < missing_list.txt
     else
         echo "WARNING: Bakta database not found at \$BAKTA_DB"
@@ -190,17 +204,22 @@ process BAKTA_GENUS {
 
     # Cleanup work directory
     rm -rf bakta_work missing_list.txt
-    
+
     echo "Successfully annotated: \$bakta_success genomes"
+    if [ "\$skipped_existing" -gt 0 ]; then
+        echo "Skipped (already in database): \$skipped_existing genomes"
+    fi
 
     # Step 3: Update metadata with gff_path and gff_source
     echo -e "\\n[3/3] Updating metadata..."
 
-    # First, create a lookup file of Bakta-generated GFF3 files
-    find . -name "*.gff3" -type f 2>/dev/null | while read -r gff; do
+    # Create a lookup file of all GFF3 files in the database directory
+    # This includes both NCBI GFF3s (from merge) and Bakta-generated ones
+    find "\$GENUS_DIR" -name "*.gff3" -type f 2>/dev/null | while read -r gff; do
         acc=\$(basename "\$gff" .gff3)
-        dir=\$(dirname "\$gff" | sed 's|^[.]/||')
-        echo "\$acc \$dir/\$(basename \$gff)"
+        # Store relative path from GENUS_DIR
+        rel_path=\$(echo "\$gff" | sed "s|^\$GENUS_DIR/||")
+        echo "\$acc \$rel_path"
     done > bakta_gff_lookup.txt
 
     # Use awk for robust CSV processing - handles carriage returns properly
