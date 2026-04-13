@@ -4,6 +4,8 @@
 
 A Nextflow DSL2 pipeline for bacterial genome assembly, pangenome-assisted scaffolding, and downstream comparative genomics analysis. Designed for Lactobacillaceae but adaptable to other bacterial families.
 
+This pipeline was developed as a one man project for a master thesis and is thus not optimised, with parts of the pipeline not completely finished, for example the BGC parts. Feel free to modify the pipeline as required and use whatever parts are interesting to you and your project.
+
 ## Overview
 
 PALS consists of two main pipelines that can be run independently or together:
